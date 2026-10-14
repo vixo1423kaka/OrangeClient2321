@@ -1,0 +1,15 @@
+Orange Client v45 - visual changes
+
+This version is based on the user's Orange Client v44 archive.
+
+Added:
+- KillAura TargetESP mode "Spiral": a custom animated double-helix target marker.
+- Existing TargetESP modes (Box, Fill, Ring, Pulse, Halo) are preserved.
+- Existing Chams settings and rendering implementation are preserved unchanged.
+
+Reference research:
+ThunderHack-Recode's public repository describes its Chams implementation as using a LivingEntityRenderer mixin and a separate model-rendering pass/handling for features; its rendering engine also uses custom 3D render helpers and animations. This patch uses that high-level architectural inspiration only; it does not copy ThunderHack source code.
+Repository: https://github.com/Pan4ur/ThunderHack-Recode
+License shown by upstream repository: GPL-3.0. Review that license before copying/adapting upstream source directly.
+
+Build status: not compiled in this environment.
