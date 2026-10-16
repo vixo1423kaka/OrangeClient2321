@@ -9,7 +9,6 @@
     "ClientPlayerEntityMixin",
     "ClientPlayerInteractionManagerAccessor",
     "ClientPlayerInteractionManagerMixin",
-    "EndCrystalEntityRendererMixin",
     "EntityMixin",
     "EntityRenderDispatcherMixin",
     "GameRendererMixin",
