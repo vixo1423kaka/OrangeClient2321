@@ -18,15 +18,11 @@ import net.minecraft.client.render.Tessellator;
 import net.minecraft.client.render.VertexFormat;
 import net.minecraft.client.render.VertexFormats;
 import net.minecraft.client.render.entity.model.EntityModel;
-import net.minecraft.client.render.entity.state.EndCrystalEntityRenderState;
 import net.minecraft.client.render.entity.state.LivingEntityRenderState;
 import net.minecraft.client.render.entity.state.PlayerEntityRenderState;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.EntityPose;
-import net.minecraft.util.Identifier;
 
-import java.lang.reflect.Field;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.WeakHashMap;
 
@@ -36,17 +32,11 @@ import java.util.WeakHashMap;
  * Rysowanie jest wywolywane z mixinow: LivingEntityRendererMixin i EndCrystalEntityRendererMixin.
  */
 public class Chams extends Module {
-    private static final Identifier CRYSTAL_TEXTURE = Identifier.of("textures/entity/end_crystal/end_crystal.png");
-
     private final BoolSetting players = add(new BoolSetting("Players", true));
     private final ColorSetting playerColor = add(new ColorSetting("Player Color", 0xFF7A00));
     private final ColorSetting friendColor = add(new ColorSetting("Friend Color", 0x55FFFF));
     private final BoolSetting playerTexture = add(new BoolSetting("Player Texture", true));
     private final BoolSetting simple = add(new BoolSetting("Simple", false));
-
-    private final BoolSetting crystals = add(new BoolSetting("Crystals", false));
-    private final ColorSetting crystalColor = add(new ColorSetting("Crystal Color", 0xFF7A00));
-    private final ModeSetting crystalMode = add(new ModeSetting("Crystal Mode", "Flat", "Flat", "Texture"));
 
     private final NumberSetting alpha = add(new NumberSetting("Alpha", 55, 5, 100, 5));
     private final BoolSetting additive = add(new BoolSetting("Additive Blend", true));
@@ -54,12 +44,11 @@ public class Chams extends Module {
     // Efekt nakladany na przedmioty renderowane w rece lokalnego gracza (1. osoba).
     private final BoolSetting heldItems = add(new BoolSetting("Held Item Chams", false));
     private final ColorSetting heldItemColor = add(new ColorSetting("Held Item Color", 0xFF7A00));
-    private final ModeSetting heldItemStyle = add(new ModeSetting("Held Item Style", "Glass", "Glass", "Solid", "Tint"));
+    private final ModeSetting heldItemStyle = add(new ModeSetting("Held Item Style", "Glass", "Glass", "Solid", "Tint", "Invert", "Grayscale", "Rainbow"));
     private final NumberSetting heldItemAlpha = add(new NumberSetting("Held Item Alpha", 45, 5, 100, 5));
 
     /** Stany renderowania graczy oznaczone jako znajomi (wypelniane w updateRenderState). */
     private static final Map<LivingEntityRenderState, Boolean> FRIEND_STATES = new WeakHashMap<>();
-    private static final Map<Class<?>, Field> MODEL_FIELDS = new HashMap<>();
 
     public Chams() {
         super("Chams", Category.RENDER);
@@ -80,29 +69,12 @@ public class Chams extends Module {
         return rendersPlayers(state) && !playerTexture.get();
     }
 
-    public boolean rendersCrystals() { return crystals.get(); }
-
     /** Czy nakladac kolorowy efekt na przedmiot renderowany w rece lokalnego gracza. */
     public boolean rendersHeldItems() { return heldItems.get(); }
 
-    /** Ustawia kolor i przezroczystosc przedmiotu; wywolanie z mixina przed vanilla renderem. */
-    public void beginHeldItemEffect() {
-        int rgb = heldItemColor.rgb();
-        float a = heldItemStyle.is("Solid") ? 1.0f
-                : (float) ((heldItemStyle.is("Glass") ? Math.min(heldItemAlpha.get(), 55) : heldItemAlpha.get()) / 100.0);
-        RenderSystem.enableBlend();
-        if (additive.get()) RenderSystem.blendFunc(GlStateManager.SrcFactor.SRC_ALPHA, GlStateManager.DstFactor.ONE);
-        else RenderSystem.defaultBlendFunc();
-        RenderSystem.setShaderColor(((rgb >> 16) & 0xFF) / 255f, ((rgb >> 8) & 0xFF) / 255f,
-                (rgb & 0xFF) / 255f, a);
-    }
-
-    /** Przywraca globalny stan renderowania po narysowaniu przedmiotu. */
-    public void endHeldItemEffect() {
-        RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.disableBlend();
-    }
+    public int heldItemRgb() { return heldItemColor.rgb(); }
+    public int heldItemAlphaPercent() { return (int) heldItemAlpha.get(); }
+    public boolean heldItemStyleIs(String style) { return heldItemStyle.is(style); }
 
     /** Rysuje model gracza; macierz musi byc juz ustawiona jak w LivingEntityRenderer (po transformacjach). */
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -115,25 +87,6 @@ public class Chams extends Module {
             model.render(matrices, buffer, light, OverlayTexture.DEFAULT_UV, -1);
         } finally {
             end(buffer);
-        }
-    }
-
-    /** Rysuje end crystala (transformacje jak w EndCrystalEntityRenderer: scale 2, translate -0.5). */
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    public void drawCrystal(Object renderer, EndCrystalEntityRenderState state, MatrixStack matrices, int light) {
-        EntityModel model = modelOf(renderer);
-        if (model == null) return;
-        boolean textured = crystalMode.is("Texture");
-        matrices.push();
-        matrices.scale(2.0f, 2.0f, 2.0f);
-        matrices.translate(0.0f, -0.5f, 0.0f);
-        BufferBuilder buffer = begin(textured, textured ? CRYSTAL_TEXTURE : null, crystalColor.rgb(), false);
-        try {
-            model.setAngles(state);
-            model.render(matrices, buffer, light, OverlayTexture.DEFAULT_UV, -1);
-        } finally {
-            end(buffer);
-            matrices.pop();
         }
     }
 
@@ -170,27 +123,4 @@ public class Chams extends Module {
         RenderSystem.enableDepthTest();
     }
 
-    /** Model renderera znajdujemy po typie pola (niezalezne od nazw yarn/intermediary). */
-    private static EntityModel<?> modelOf(Object renderer) {
-        try {
-            Field f = MODEL_FIELDS.get(renderer.getClass());
-            if (f == null) {
-                outer:
-                for (Class<?> c = renderer.getClass(); c != null; c = c.getSuperclass()) {
-                    for (Field x : c.getDeclaredFields()) {
-                        if (EntityModel.class.isAssignableFrom(x.getType())) {
-                            x.setAccessible(true);
-                            f = x;
-                            break outer;
-                        }
-                    }
-                }
-                if (f == null) return null;
-                MODEL_FIELDS.put(renderer.getClass(), f);
-            }
-            return (EntityModel<?>) f.get(renderer);
-        } catch (Exception e) {
-            return null;
-        }
-    }
 }
