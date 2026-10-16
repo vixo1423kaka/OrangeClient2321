@@ -1,9 +1,0 @@
-ThunderHack-Recode attribution and porting notice
-
-Upstream project: ThunderHack-Recode by Pan4ur
-Repository: https://github.com/Pan4ur/ThunderHack-Recode
-Upstream license: GNU General Public License v3.0 (GPL-3.0).
-
-This port adapts the ThunderHack player-model chams approach and Aura target-ESP visual patterns to Orange Client's module/settings architecture and Minecraft 1.21.4 Yarn mappings. Related code in this distribution is provided under GPL-3.0-only. See LICENSE-THUNDERHACK-GPL-3.0.txt for the license text.
-
-This is an unofficial port and is not endorsed by the upstream project. Changes in this port are not the original ThunderHack source verbatim; they have been adapted for this project's architecture and version.
