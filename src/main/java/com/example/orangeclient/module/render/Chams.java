@@ -51,6 +51,12 @@ public class Chams extends Module {
     private final NumberSetting alpha = add(new NumberSetting("Alpha", 55, 5, 100, 5));
     private final BoolSetting additive = add(new BoolSetting("Additive Blend", true));
 
+    // Efekt nakladany na przedmioty renderowane w rece lokalnego gracza (1. osoba).
+    private final BoolSetting heldItems = add(new BoolSetting("Held Item Chams", false));
+    private final ColorSetting heldItemColor = add(new ColorSetting("Held Item Color", 0xFF7A00));
+    private final ModeSetting heldItemStyle = add(new ModeSetting("Held Item Style", "Glass", "Glass", "Solid", "Tint"));
+    private final NumberSetting heldItemAlpha = add(new NumberSetting("Held Item Alpha", 45, 5, 100, 5));
+
     /** Stany renderowania graczy oznaczone jako znajomi (wypelniane w updateRenderState). */
     private static final Map<LivingEntityRenderState, Boolean> FRIEND_STATES = new WeakHashMap<>();
     private static final Map<Class<?>, Field> MODEL_FIELDS = new HashMap<>();
@@ -75,6 +81,28 @@ public class Chams extends Module {
     }
 
     public boolean rendersCrystals() { return crystals.get(); }
+
+    /** Czy nakladac kolorowy efekt na przedmiot renderowany w rece lokalnego gracza. */
+    public boolean rendersHeldItems() { return heldItems.get(); }
+
+    /** Ustawia kolor i przezroczystosc przedmiotu; wywolanie z mixina przed vanilla renderem. */
+    public void beginHeldItemEffect() {
+        int rgb = heldItemColor.rgb();
+        float a = heldItemStyle.is("Solid") ? 1.0f
+                : (float) ((heldItemStyle.is("Glass") ? Math.min(heldItemAlpha.get(), 55) : heldItemAlpha.get()) / 100.0);
+        RenderSystem.enableBlend();
+        if (additive.get()) RenderSystem.blendFunc(GlStateManager.SrcFactor.SRC_ALPHA, GlStateManager.DstFactor.ONE);
+        else RenderSystem.defaultBlendFunc();
+        RenderSystem.setShaderColor(((rgb >> 16) & 0xFF) / 255f, ((rgb >> 8) & 0xFF) / 255f,
+                (rgb & 0xFF) / 255f, a);
+    }
+
+    /** Przywraca globalny stan renderowania po narysowaniu przedmiotu. */
+    public void endHeldItemEffect() {
+        RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.disableBlend();
+    }
 
     /** Rysuje model gracza; macierz musi byc juz ustawiona jak w LivingEntityRenderer (po transformacjach). */
     @SuppressWarnings({"rawtypes", "unchecked"})
