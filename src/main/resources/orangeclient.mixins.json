@@ -13,6 +13,7 @@
     "EntityMixin",
     "EntityRenderDispatcherMixin",
     "GameRendererMixin",
+    "HeldItemRendererMixin",
     "InGameHudMixin",
     "InGameOverlayRendererMixin",
     "LivingEntityAccessor",
