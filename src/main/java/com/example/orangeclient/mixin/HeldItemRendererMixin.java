@@ -1,6 +1,7 @@
 package com.example.orangeclient.mixin;
 
 import com.example.orangeclient.module.ModuleManager;
+import com.example.orangeclient.render.HeldItemChamsVertexConsumer;
 import com.example.orangeclient.module.render.Chams;
 import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.item.HeldItemRenderer;
