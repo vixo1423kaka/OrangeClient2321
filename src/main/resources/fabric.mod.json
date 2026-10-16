@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "orangeclient",
+  "version": "0.1.0",
+  "name": "Orange Client",
+  "description": "Modularny klient: Render + Player.",
+  "authors": [
+    "YourName"
+  ],
+  "license": "GPL-3.0-only",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.example.orangeclient.OrangeClient"
+    ]
+  },
+  "mixins": [
+    "orangeclient.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.15.10",
+    "minecraft": "1.21.4",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
