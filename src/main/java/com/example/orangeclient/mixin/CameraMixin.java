@@ -1,0 +1,47 @@
+package com.example.orangeclient.mixin;
+
+import com.example.orangeclient.module.movement.Freecam;
+import com.example.orangeclient.module.movement.FreeLook;
+import com.example.orangeclient.module.ModuleManager;
+import com.example.orangeclient.module.render.NoCameraClip;
+import net.minecraft.client.render.Camera;
+import net.minecraft.entity.Entity;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.BlockView;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(Camera.class)
+public abstract class CameraMixin {
+    @Shadow protected abstract void setPos(double x, double y, double z);
+
+    @Shadow protected abstract void setRotation(float yaw, float pitch);
+
+
+    @Inject(method = "clipToSpace", at = @At("HEAD"), cancellable = true, require = 0)
+    private void orange$noCameraClip(float desiredCameraDistance, CallbackInfoReturnable<Float> cir) {
+        NoCameraClip module = ModuleManager.get(NoCameraClip.class);
+        if (module != null && module.isEnabled()) cir.setReturnValue(module.cameraDistance());
+    }
+
+    /** Freecam: po zwyklym ustawieniu kamery przenosimy ja w wolne miejsce. */
+    @Inject(method = "update", at = @At("RETURN"), require = 0)
+    private void orange$freecamUpdate(BlockView area, Entity focusedEntity, boolean thirdPerson,
+                                      boolean inverseView, float tickDelta, CallbackInfo ci) {
+        if (FreeLook.isActive()) { setRotation(FreeLook.cameraYaw(), FreeLook.cameraPitch()); return; }
+        if (!Freecam.isActive()) return;
+        Vec3d p = Freecam.cameraPos(tickDelta);
+        setPos(p.x, p.y, p.z);
+        setRotation(Freecam.cameraYaw(), Freecam.cameraPitch());
+    }
+
+    /** Freecam: kamera "w trzeciej osobie", dzieki temu widac model gracza, a reka nie jest rysowana. */
+    @Inject(method = "isThirdPerson", at = @At("HEAD"), cancellable = true, require = 0)
+    private void orange$freecamThirdPerson(CallbackInfoReturnable<Boolean> cir) {
+        if (Freecam.isActive()) cir.setReturnValue(true);
+    }
+}
