@@ -41,7 +41,14 @@ final class HeldItemChamsVertexConsumer implements VertexConsumer {
             r = tr;
             g = tg;
             b = tb;
-        } else if (chams.heldItemStyleIs("Tint") || chams.heldItemStyleIs("Glass")) {
+        } else if (chams.heldItemStyleIs("Tint")) {
+            // Softer tint than Solid; keep the modes visibly distinct on ordinary item models.
+            float strength = chams.heldItemAlphaPercent() / 100.0f;
+            r = (int) (r * tr / 255.0f * strength);
+            g = (int) (g * tg / 255.0f * strength);
+            b = (int) (b * tb / 255.0f * strength);
+            a = a * chams.heldItemAlphaPercent() / 100;
+        } else if (chams.heldItemStyleIs("Glass")) {
             r = r * tr / 255;
             g = g * tg / 255;
             b = b * tb / 255;
