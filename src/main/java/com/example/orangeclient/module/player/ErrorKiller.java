@@ -4,7 +4,7 @@ import com.example.orangeclient.OrangeClient;
 import com.example.orangeclient.module.Category;
 import com.example.orangeclient.module.Module;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.block.AbstractButtonBlock;
+import net.minecraft.block.ButtonBlock;
 import net.minecraft.block.AbstractPressurePlateBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.LeverBlock;
@@ -256,7 +256,7 @@ public class ErrorKiller extends Module {
         // Keep the original target and also support fragile/redstone attachments that
         // water removes, such as buttons, levers, pressure plates, torches and tripwire.
         return (targetClass != null && targetClass.isInstance(block))
-                || block instanceof AbstractButtonBlock
+                || block instanceof ButtonBlock
                 || block instanceof LeverBlock
                 || block instanceof AbstractPressurePlateBlock
                 || block instanceof TorchBlock
