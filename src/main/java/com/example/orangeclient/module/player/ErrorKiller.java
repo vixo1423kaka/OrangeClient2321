@@ -21,31 +21,28 @@ import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 
 /**
- * Port moda "Error Killer" (errorkiller 1.11.1 dla MC 1.21.4, autor: sigmapowazna, licencja MIT) na modul klienta.
+ * Port moda "Error Killer" (errorkiller 1.11.1 dla MC 1.21.4, autor: sigmapowazna, licencja MIT).
  *
- * Zamiast robic wszystko w jednym ticku, sekwencja jest rozlozona na ticki:
- *   1) przelacz na wiadro i postaw plyn,
- *   2) poczekaj az plyn sie pojawi i zbierz go,
- *   3) sprawdz ze wiadro jest znowu pelne, w razie potrzeby ponow zbieranie,
- *   4) dopiero wtedy postaw blok.
- * Dzieki temu blok nie nadpisuje wody, gdy zbieranie sie nie uda.
+ * Gdy chcesz postawic blok, a w docelowej komorce stoi przeszkoda (dzwignia, przycisk, plytka,
+ * tripwire), mod stawia tam wode, zbiera ja z powrotem, a na koncu stawia twoj blok.
+ *
+ * Delay:
+ *   0 = wszystko w jednym ticku (zachowanie oryginalnego moda, najszybciej)
+ *   1-3 = przerwa w tickach miedzy krokami (wolniej, ale stabilniej na serwerze)
  */
 public class ErrorKiller extends Module {
-    /** Przerwa miedzy krokami w tickach (0 = co tick, max 5). */
-    private final NumberSetting delay = add(new NumberSetting("Delay", 1, 0, 5, 1));
-    /** Ile razy probowac zebrac plyn, zanim odpuscimy. */
-    private final NumberSetting tries = add(new NumberSetting("PickupTries", 4, 1, 10, 1));
+    /** Przerwa miedzy krokami w tickach: 0 = od razu, 3 = najwolniej. */
+    private final NumberSetting delay = add(new NumberSetting("Delay", 0, 0, 3, 1));
 
     private static Class<?> targetClass;
     private static boolean targetResolved;
 
-    // --- stan sekwencji ---
-    private int phase;          // 0 = idle, 1 = plyn postawiony, 2 = zbieranie plynu
+    // 0 = idle, 1 = plyn postawiony (czekamy na zbieranie), 2 = plyn zebrany (czekamy na blok)
+    private int phase;
     private int cooldown;
-    private int triesLeft;
-    private int blockSlot = -1, fluidSlot = -1;
+    private int blockSlot = -1;
+    private int fluidSlot = -1;
     private BlockHitResult target;
-    private BlockPos placePos;
 
     public ErrorKiller() {
         super("ErrorKiller", Category.PLAYER);
@@ -59,11 +56,9 @@ public class ErrorKiller extends Module {
     private void reset() {
         phase = 0;
         cooldown = 0;
-        triesLeft = 0;
         blockSlot = -1;
         fluidSlot = -1;
         target = null;
-        placePos = null;
     }
 
     /**
@@ -92,46 +87,47 @@ public class ErrorKiller extends Module {
         blockSlot = mc.player.getInventory().selectedSlot;
         fluidSlot = bucket;
         target = hit;
-        placePos = pos;
 
         // Krok 1: przelacz na wiadro i postaw plyn.
-        mc.player.getInventory().selectedSlot = fluidSlot;
+        switchTo(mc, fluidSlot);
         mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
 
-        phase = 1;
-        triesLeft = (int) tries.get();
-        cooldown = (int) delay.get();
+        int d = (int) delay.get();
+        if (d <= 0) {
+            // Delay 0: robimy wszystko od razu, tak jak oryginalny mod.
+            pickUp(mc);
+            placeBlock(mc);
+        } else {
+            phase = 1;
+            cooldown = d;
+        }
         return true;
     }
 
     @Override
     public void onTick(MinecraftClient mc) {
-        if (phase == 0 || mc.player == null || mc.world == null || mc.interactionManager == null) return;
-        if (cooldown > 0) { cooldown--; return; }
-
-        switch (phase) {
-            case 1 -> {
-                if (fluidPlaced(mc)) {
-                    switchTo(mc, fluidSlot);
-                    mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
-                    phase = 2;
-                    cooldown = (int) delay.get();
-                } else if (--triesLeft <= 0) {
-                    placeBlock(mc);
-                }
-            }
-            case 2 -> {
-                if (bucketFull(mc)) {
-                    placeBlock(mc);
-                } else if (--triesLeft > 0) {
-                    switchTo(mc, fluidSlot);
-                    mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
-                    cooldown = (int) delay.get();
-                } else {
-                    placeBlock(mc);
-                }
-            }
+        if (phase == 0) return;
+        if (mc.player == null || mc.world == null || mc.interactionManager == null) {
+            reset();
+            return;
         }
+        if (cooldown > 0) {
+            cooldown--;
+            return;
+        }
+
+        if (phase == 1) {
+            pickUp(mc);
+            phase = 2;
+            cooldown = (int) delay.get();
+        } else {
+            placeBlock(mc);
+        }
+    }
+
+    private void pickUp(MinecraftClient mc) {
+        switchTo(mc, fluidSlot);
+        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
     }
 
     private void placeBlock(MinecraftClient mc) {
@@ -142,18 +138,6 @@ public class ErrorKiller extends Module {
 
     private static void switchTo(MinecraftClient mc, int slot) {
         if (slot >= 0 && slot < 9) mc.player.getInventory().selectedSlot = slot;
-    }
-
-    /** Czy w miejscu docelowym jest juz plyn (woda/lawa). */
-    private boolean fluidPlaced(MinecraftClient mc) {
-        return placePos != null && !mc.world.getFluidState(placePos).isEmpty();
-    }
-
-    /** Czy w slocie z wiadrem jest znowu pelne wiadro. */
-    private boolean bucketFull(MinecraftClient mc) {
-        if (fluidSlot < 0) return false;
-        ItemStack s = mc.player.getInventory().getStack(fluidSlot);
-        return s.isOf(Items.WATER_BUCKET) || s.isOf(Items.LAVA_BUCKET);
     }
 
     private static int findBucket(MinecraftClient mc) {
