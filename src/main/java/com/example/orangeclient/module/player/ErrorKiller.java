@@ -136,8 +136,8 @@ public class ErrorKiller extends Module {
 
             // If the bucket was not consumed, placement failed. If it was consumed, keep
             // searching for the source rather than placing the requested block over live liquid.
-            if (stageTicks > 20 && mc.player.getInventory().getStack(liquidSlot).isOf(Items.WATER_BUCKET)
-                    || stageTicks > 20 && mc.player.getInventory().getStack(liquidSlot).isOf(Items.LAVA_BUCKET)) {
+            if (stageTicks > 20 && (mc.player.getInventory().getStack(liquidSlot).isOf(Items.WATER_BUCKET)
+                    || mc.player.getInventory().getStack(liquidSlot).isOf(Items.LAVA_BUCKET))) {
                 mc.player.getInventory().selectedSlot = blockSlot;
                 mc.player.sendMessage(Text.literal("§c[Error Killer] Could not place liquid; block placement cancelled."), true);
                 resetState();
@@ -192,10 +192,6 @@ public class ErrorKiller extends Module {
                 }
             }
         }
-    }
-
-    private BlockPos findNewSource(MinecraftClient mc, Fluid fluid, BlockPos... centers) {
-        return findNewSource(mc, fluid, centers[0], centers.length > 1 ? centers[1] : centers[0], 4);
     }
 
     private BlockPos findNewSource(MinecraftClient mc, Fluid fluid, BlockPos first, BlockPos second, int radius) {
