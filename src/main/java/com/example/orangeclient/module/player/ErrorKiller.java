@@ -4,7 +4,11 @@ import com.example.orangeclient.OrangeClient;
 import com.example.orangeclient.module.Category;
 import com.example.orangeclient.module.Module;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.block.AbstractPressurePlateBlock;
 import net.minecraft.block.Block;
+import net.minecraft.block.ButtonBlock;
+import net.minecraft.block.LeverBlock;
+import net.minecraft.block.TripwireHookBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
@@ -18,14 +22,11 @@ import net.minecraft.util.math.BlockPos;
 /**
  * Port moda "Error Killer" (errorkiller 1.11.1 dla MC 1.21.4, autor: sigmapowazna, licencja MIT) na modul klienta.
  *
- * Gdy stawiasz blok i miejsce docelowe jest "blokiem-celem" (ta sama klasa, co w oryginalnym modzie),
- * zwykle uzycie jest anulowane, a zamiast niego - wszystko w jednym ticku:
- *   1) przelaczamy sie na wiadro z woda/lawa z paska i uzywamy je (postawienie plynu),
- *   2) uzywamy je ponownie (odebranie plynu),
- *   3) wracamy na slot z blokiem i stawiamy blok w to samo miejsce.
+ * Gdy stawiasz blok i miejsce docelowe jest blokiem specjalnym, zwykle uzycie jest anulowane,
+ * a zamiast niego probujemy postawic i odebrac plyn, po czym stawiamy blok.
  */
 public class ErrorKiller extends Module {
-    /** Klasa "bloku-celu" z oryginalnego moda (net.minecraft.class_2401), rozwiazywana niezaleznie od mapowan. */
+    /** Klasa bloku celu z oryginalnego moda, rozwiazywana niezaleznie od mapowan. */
     private static Class<?> targetClass;
     private static boolean targetResolved;
 
@@ -68,14 +69,22 @@ public class ErrorKiller extends Module {
 
         int prev = mc.player.getInventory().selectedSlot;
         mc.player.getInventory().selectedSlot = liquidSlot;
-        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND); // postaw plyn
-        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND); // odbierz plyn
+        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
         mc.player.getInventory().selectedSlot = blockSlot;
         mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, target);
         mc.player.getInventory().selectedSlot = prev;
     }
 
     private static boolean isTargetBlock(Block block) {
+        // Zachowujemy oryginalny blok celu i dodajemy typowe elementy redstone.
+        if (block instanceof ButtonBlock
+                || block instanceof AbstractPressurePlateBlock
+                || block instanceof LeverBlock
+                || block instanceof TripwireHookBlock) {
+            return true;
+        }
+
         if (!targetResolved) {
             targetResolved = true;
             try {
