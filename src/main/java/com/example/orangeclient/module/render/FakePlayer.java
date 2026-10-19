@@ -22,6 +22,7 @@ public class FakePlayer extends Module {
     private final BoolSetting copyInventory = add(new BoolSetting("CopyInventory", true));
     private final BoolSetting copyEffects = add(new BoolSetting("CopyEffects", true));
     private OtherClientPlayerEntity clone;
+    private double anchorY;
 
     public FakePlayer() { super("FakePlayer", Category.RENDER); }
 
@@ -31,7 +32,7 @@ public class FakePlayer extends Module {
         removeClone();
         PlayerEntity source = mc.player;
         String name = cloneName.get().isBlank() ? "OrangeDummy" : cloneName.get();
-        GameProfile profile = new GameProfile(source.getGameProfile().getId(), name);
+        GameProfile profile = new GameProfile(UUID.randomUUID(), name);
         // Preserve the active player's texture properties so the clone uses the same skin.
         profile.getProperties().putAll(source.getGameProfile().getProperties());
         clone = new OtherClientPlayerEntity((ClientWorld) mc.world, profile);
@@ -42,12 +43,14 @@ public class FakePlayer extends Module {
         // Place feet exactly on the surface at the clone's X/Z, even when it stands one block ahead.
         int groundY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, net.minecraft.util.math.MathHelper.floor(x), net.minecraft.util.math.MathHelper.floor(z));
         double y = Math.max(source.getY(), groundY);
+        anchorY = y;
         clone.setId(-1000);
         clone.refreshPositionAndAngles(x, y, z, source.getYaw(), source.getPitch());
         clone.setBodyYaw(source.getBodyYaw());
         clone.setHeadYaw(source.getHeadYaw());
         clone.setOnGround(true);
         clone.setNoGravity(true);
+        clone.noClip = true;
         for (EquipmentSlot slot : EquipmentSlot.values()) clone.equipStack(slot, source.getEquippedStack(slot).copy());
         if (copyInventory.get()) {
             for (int i = 0; i < source.getInventory().size(); i++) {
@@ -65,8 +68,10 @@ public class FakePlayer extends Module {
         if (clone.isRemoved()) { setEnabled(false); return; }
         // Lock feet to the ground level chosen at creation and keep this client-only dummy stationary.
         clone.setNoGravity(true);
-        int groundY = mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, net.minecraft.util.math.MathHelper.floor(clone.getX()), net.minecraft.util.math.MathHelper.floor(clone.getZ()));
-        clone.setPosition(clone.getX(), groundY, clone.getZ());
+        clone.noClip = true;
+        // Keep the original feet height. Recomputing the heightmap every tick makes the dummy
+        // jump to the top of any newly placed block above it.
+        clone.setPosition(clone.getX(), anchorY, clone.getZ());
         clone.setOnGround(true);
         clone.setVelocity(Vec3d.ZERO);
     }
@@ -93,5 +98,6 @@ public class FakePlayer extends Module {
 
     private void removeClone() {
         if (clone != null) { clone.discard(); clone = null; }
+        anchorY = 0.0;
     }
 }

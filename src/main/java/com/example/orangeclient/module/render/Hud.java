@@ -50,6 +50,7 @@ public class Hud extends Module {
     private final ModeSetting notifAnchor = add(new ModeSetting("NotifAnchor", "Bottom Right", ANCHORS));
     private final NumberSetting notifX = add(new NumberSetting("NotifX", 8, 0, 3000, 1));
     private final NumberSetting notifY = add(new NumberSetting("NotifY", 8, 0, 3000, 1));
+    private final BoolSetting notifCenter = add(new BoolSetting("NotifCenter", false));
 
     /** Ta sama czcionka co w menu (util/UiFont). */
     private static MutableText font(String s) { return UiFont.of(s); }
@@ -57,7 +58,7 @@ public class Hud extends Module {
     public Hud() {
         super("HUD", Category.RENDER);
         // pozycje ustawia sie przeciagajac w "Edit HUD", wiec suwaki i kotwice chowamy z menu (config dalej je zapisuje)
-        for (Setting s : new Setting[]{listAnchor, listX, listY, notifAnchor, notifX, notifY}) s.hidden = true;
+        for (Setting s : new Setting[]{listAnchor, listX, listY, notifAnchor, notifX, notifY, notifCenter}) s.hidden = true;
     }
 
     // ------------------------------------------------------------------ powiadomienia (czytane przez Notifications)
@@ -70,6 +71,8 @@ public class Hud extends Module {
     public static boolean notifVisible() { Hud h = active(); return h == null || h.notifs.get(); }
     public static boolean notifRight() { Hud h = active(); return h == null || h.notifAnchor.get().endsWith("Right"); }
     public static boolean notifBottom() { Hud h = active(); return h == null || h.notifAnchor.get().startsWith("Bottom"); }
+    /** Powiadomienie wysrodkowane w poziomie (przeciagniete na srodek w Edit HUD): pojawia sie bez wjazdu z boku. */
+    public static boolean notifCenter() { Hud h = active(); return h != null && h.notifCenter.get(); }
     public static int notifX() { Hud h = active(); return h == null ? 8 : (int) h.notifX.get(); }
     public static int notifY() { Hud h = active(); return h == null ? 8 : (int) h.notifY.get(); }
 
@@ -82,13 +85,14 @@ public class Hud extends Module {
     public int[] notifPos(int sw, int sh, int w, int h) {
         boolean right = notifAnchor.get().endsWith("Right"), bottom = notifAnchor.get().startsWith("Bottom");
         int mx = (int) notifX.get(), my = (int) notifY.get();
-        return new int[]{right ? sw - mx - w : mx, bottom ? sh - my - h : my};
+        return new int[]{notifCenter.get() ? (sw - w) / 2 : right ? sw - mx - w : mx, bottom ? sh - my - h : my};
     }
 
     /** Ustawia powiadomienie tak, zeby jego lewy gorny rog byl w (x, y): kotwica = najblizszy rog ekranu. */
     public void setNotifPos(int sw, int sh, int x, int y, int w, int h) {
         boolean right = x + w / 2 > sw / 2, bottom = y + h / 2 > sh / 2;
         notifAnchor.set((bottom ? "Bottom " : "Top ") + (right ? "Right" : "Left"));
+        notifCenter.set(Math.abs(x + w / 2 - sw / 2) <= 1);
         notifX.set(right ? sw - x - w : x);
         notifY.set(bottom ? sh - y - h : y);
     }

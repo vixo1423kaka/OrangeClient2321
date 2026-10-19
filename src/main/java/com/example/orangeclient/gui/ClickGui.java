@@ -143,14 +143,28 @@ public class ClickGui extends Screen {
     private final Map<Module, Float> expandAnim = new HashMap<>();
     private final Map<Module, Float> hoverAnim = new HashMap<>();
     private final Map<Setting, Float> settingHoverAnim = new HashMap<>();   // animacja hovera ustawien 0..1
+    private record SK(Object o, int id) { }
+    private final Map<SK, float[]> springs = new HashMap<>();             // stany sprezyn {pozycja, predkosc}
+    private final Map<Module, Float> enableAnim = new HashMap<>();        // plynne ON/OFF karty 0..1
+    private final Map<Setting, Float> boolAnim = new HashMap<>();         // plynne ON/OFF ustawien 0..1
+    private final Map<Setting, Float> sliderAnim = new HashMap<>();       // wygladzone wypelnienie sliderow
+    private record Spark(float x, float y, float vx, float vy, float size, long start) { }
+    private final List<Spark> sparks = new ArrayList<>();                 // iskry po wlaczeniu modulu
+    private float pillTail = currentTab == Tab.WAYPOINTS ? 0f : currentTab.ordinal();
+    private int lastRailIdx = 0;
+    private long lastScrollMs;
+    private long colorPickerOpenMs;
+    /** Globalny mnoznik przezroczystosci ksztaltow i tekstu (animacje wejscia). Zawsze wraca do 1. */
+    private static float uiAlpha = 1f;
     private final Map<Category, Float> railHoverAnim = new HashMap<>();   // animacja hovera przyciskow kategorii 0..1   // postep rozwijania ustawien modulu 0..1
 
-    private enum Focus { NONE, SEARCH, FRIEND, SETTING, WP_NEW, WP_EDIT }
+    private enum Focus { NONE, SEARCH, FRIEND, SETTING, WP_NEW, WP_EDIT, CONFIG_NEW }
 
     private Focus focus = Focus.NONE;
     private StringSetting editingSetting;   // pole tekstowe edytowane w tej chwili (Focus.SETTING)
     private static String friendInput = "";
     private static String wpInput = "";
+    private static String configInput = "";
     private int wpEditIdx = -1;
 
     // pole wyszukiwania
@@ -204,6 +218,7 @@ public class ClickGui extends Screen {
 
     @Override
     public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
+        uiAlpha = 1f;
         hits.clear();
         bindHits.clear();
         editHits.clear();
@@ -239,8 +254,7 @@ public class ClickGui extends Screen {
         // ale z delikatnym overshootem i lagodnym fade-in dla bardziej premium efektu.
         float op = Math.min(1f, (now - openStart) / (float) OPEN_MS);
         float baseEase = 1f - (1f - op) * (1f - op) * (1f - op);
-        float oe = op >= 1f ? 1f : Math.min(1.035f,
-                baseEase + (float) (Math.sin(op * Math.PI) * 0.035f * (1f - op)));
+        float oe = easeOutBack(op, 1.9f);
         float fade = op * op * (3f - 2f * op);
         ctx.fill(0, 0, width, height, ((int) (0x78 * fade) << 24));
         var m = ctx.getMatrices();
@@ -255,12 +269,23 @@ public class ClickGui extends Screen {
         m.translate(-pcx, -pcy, 0f);
 
         // --- poswiata + tlo (gradient, ~50% przezroczystosci) + ramka
+        for (int i = 7; i >= 1; i--) {   // miekki cien pod panelem (rosnie podczas przeciagania)
+            float sf = 1f - i / 8f;
+            int sa = (int) (0x1E * sf * sf * (1f + 0.8f * lift));
+            roundRing(ctx, px - i, py - i + 4, px + pw + i, py + ph + i + 5, r + i, sa << 24);
+        }
         for (int i = 3; i >= 1; i--) {
             float f = 1f - i / 9f;
-            int a = (int) (0x48 * f * f);
+            int a = (int) (0x48 * f * f * (0.8f + 0.2f * (float) Math.sin(now / 900.0 + i)));
             roundRing(ctx, px - i, py - i, px + pw + i, py + ph + i, r + i, (a << 24) | 0xFFFF8617);
         }
-        roundRectGradient(ctx, px + 1, py + 1, px + pw - 1, py + ph - 1, r - 1, 0xB01B2028, 0xB0101318, true);
+        float aur = 0.5f + 0.5f * (float) Math.sin(now / 2600.0);   // tlo "zyje": wolno przechodzi miedzy chlodnym a cieplym odcieniem
+        roundRectGradient(ctx, px + 1, py + 1, px + pw - 1, py + ph - 1, r - 1,
+                lerpColor(0xB01B2028, 0xB02A1B1A, aur), lerpColor(0xB0101318, 0xB01C1210, 1f - aur), true);
+        fadeLine(ctx, px + 14, px + pw - 14, py + 1, 0xFFFFFF, 0x30);
+        float sweepB = 1f - (now % 2400L) / 2400f;   // dolna krawedz: swiatlo plynie w druga strone
+        int sweepBX = px + 12 + Math.round((pw - 24) * sweepB);
+        fadeLine(ctx, Math.max(px + 10, sweepBX - 26), Math.min(px + pw - 10, sweepBX + 26), py + ph - 1, 0xFFFFC890, 0x90);
         roundRing(ctx, px, py, px + pw, py + ph, r, 0xFFFF8617);
 
         // --- kregaca sie pomarancz za cala reszta
@@ -295,11 +320,16 @@ public class ClickGui extends Screen {
         int ty = barY1 + 5;
         if (!wpView) {
             float targetIdx = currentTab.ordinal();
-            pillIdx += (targetIdx - pillIdx) * (1f - (float) Math.exp(-dt * 16f));
+            pillIdx += (targetIdx - pillIdx) * (1f - (float) Math.exp(-dt * 20f));
+            pillTail += (targetIdx - pillTail) * (1f - (float) Math.exp(-dt * 10f));
             if (Math.abs(targetIdx - pillIdx) < 0.003f) pillIdx = targetIdx;
-            int pillX = tabsX + Math.round(pillIdx * (tabW + tabGap));
-            roundRectGradient(ctx, pillX, ty, pillX + tabW, ty + 18, 9, 0xFFF58A24, 0xFFB95308, true);
-            roundRing(ctx, pillX, ty, pillX + tabW, ty + 18, 9, 0x55FFB56B);
+            if (Math.abs(targetIdx - pillTail) < 0.003f) pillTail = targetIdx;
+            float pillLo = Math.min(pillIdx, pillTail), pillHi = Math.max(pillIdx, pillTail);
+            int pillX = tabsX + Math.round(pillLo * (tabW + tabGap));
+            int pillX2 = tabsX + Math.round(pillHi * (tabW + tabGap)) + tabW;
+            roundRing(ctx, pillX - 1, ty - 1, pillX2 + 1, ty + 19, 10, 0x30FF8617);
+            roundRectGradient(ctx, pillX, ty, pillX2, ty + 18, 9, 0xFFF58A24, 0xFFB95308, true);
+            roundRing(ctx, pillX, ty, pillX2, ty + 18, 9, 0x55FFB56B);
         }
 
         for (int i = 0; i < tabs.length; i++) {
@@ -326,7 +356,9 @@ public class ClickGui extends Screen {
         sbx1 = sbx2 - Math.min(120, pw / 3);
         sby1 = py + 5;
         sby2 = sby1 + 18;
-        roundRect(ctx, sbx1, sby1, sbx2, sby2, 9, focus == Focus.SEARCH ? ORANGE : OUTLINE);
+        float sf = Math.max(0f, Math.min(1f, spring(this, 20, focus == Focus.SEARCH ? 1f : 0f, 220f, 26f)));
+        if (sf > 0.01f) roundRing(ctx, sbx1 - 2, sby1 - 2, sbx2 + 2, sby2 + 2, 11, (Math.round(0x40 * sf) << 24) | 0xFF8617);
+        roundRect(ctx, sbx1, sby1, sbx2, sby2, 9, lerpColor(OUTLINE, ORANGE, sf));
         roundRect(ctx, sbx1 + 1, sby1 + 1, sbx2 - 1, sby2 - 1, 8, 0xB00A0705);
         if (query.isEmpty() && focus != Focus.SEARCH) {
             UiFont.drawCentered(ctx, textRenderer, fnt("Search..."), (sbx1 + sbx2) / 2, sby1 + 5, TEXT_DIM);
@@ -366,14 +398,15 @@ public class ClickGui extends Screen {
                 railAmt += ((railHover ? 1f : 0f) - railAmt) * (1f - (float) Math.exp(-dt * 22f));
                 if (Math.abs((railHover ? 1f : 0f) - railAmt) < 0.008f) railAmt = railHover ? 1f : 0f;
                 railHoverAnim.put(cat, railAmt);
-                drawCardBody(ctx, px + 10, iy, 26, 27, selected, railAmt);
+                float railSel = Math.max(0f, Math.min(1f, spring(cat, 3, selected ? 1f : 0f, 220f, 26f)));
+                drawCardBodyBlend(ctx, px + 10, iy, 26, 27, 9, true, railSel, railAmt);
                 // Category textures are pre-colored PNGs; DrawContext in 1.21.4 has no setShaderColor.
                 // Rysujemy tylko faktyczna zawartosc ikony (bez przezroczystych brzegow),
                 // skalowana z zachowaniem proporcji do ICON_MAX px i wycentrowana w przycisku.
                 int[] bb = CATEGORY_BBOX[i];               // {u, v, w, h} w teksturze 64x64
                 float sc = (float) CATEGORY_ICON_MAX / Math.max(bb[2], bb[3]);
-                int dw = Math.max(1, Math.round(bb[2] * sc));
-                int dh = Math.max(1, Math.round(bb[3] * sc));
+                int dw = Math.max(1, Math.round(bb[2] * sc * (1f + 0.14f * railAmt)));
+                int dh = Math.max(1, Math.round(bb[3] * sc * (1f + 0.14f * railAmt)));
                 int dx = px + 10 + (26 - dw) / 2;          // przycisk: px+10..px+36 (26 px)
                 int dy = iy + (27 - dh) / 2;               // przycisk: iy..iy+27 (27 px)
                 ctx.drawTexture(RenderLayer::getGuiTextured, selected ? CATEGORY_TEX_WHITE[i] : CATEGORY_TEX[i], dx, dy,
@@ -387,9 +420,20 @@ public class ClickGui extends Screen {
                     scrollTarget = 0;
                 }, null, null));
             }
+            // wskaznik wybranej kategorii - plynie na sprezynie miedzy przyciskami
+            int selIdx = -1;
+            for (int ri = 0; ri < railCats.length; ri++) if (railCats[ri] == selectedCategory) selIdx = ri;
+            if (selIdx >= 0) lastRailIdx = selIdx;
+            float barPos = spring(this, 10, lastRailIdx, 200f, 17f);
+            float barA = Math.max(0f, Math.min(1f, spring(this, 11, selIdx >= 0 ? 1f : 0f, 200f, 28f)));
+            if (barA > 0.01f) {
+                int barY = ry + Math.round(barPos * 34f) + 3;
+                roundRect(ctx, px + 3, barY - 2, px + 8, barY + 23, 2.5f, (Math.round(0x30 * barA) << 24) | 0xFF8617);
+                roundRect(ctx, px + 4, barY, px + 7, barY + 21, 1.5f, scaleAlpha(ORANGE, barA));
+            }
         }
 
-        if (currentTab == Tab.MODULES || currentTab == Tab.FRIENDS || currentTab == Tab.WAYPOINTS) {
+        if (currentTab == Tab.MODULES || currentTab == Tab.FRIENDS || currentTab == Tab.WAYPOINTS || currentTab == Tab.CONFIGS) {
             // Plynne przewijanie: scrollY dojezdza do scrollTarget (ease-out, niezalezne od FPS).
             scrollTarget = Math.max(0f, Math.min(maxScroll, scrollTarget));
             scrollY += (scrollTarget - scrollY) * (1f - (float) Math.exp(-dt * 14f));
@@ -403,6 +447,8 @@ public class ClickGui extends Screen {
                 bottom = drawModules(ctx, cx1 + slide + (currentTab == Tab.MODULES ? categorySlide : 0), top, availW, mouseX, mouseY);
             } else if (currentTab == Tab.WAYPOINTS) {
                 bottom = drawWaypoints(ctx, cx1 + slide, top, availW, mouseX, mouseY);
+            } else if (currentTab == Tab.CONFIGS) {
+                bottom = drawConfigs(ctx, cx1 + slide, top, availW, mouseX, mouseY);
             } else {
                 bottom = drawFriends(ctx, cx1 + slide, top, availW, mouseX, mouseY);
             }
@@ -416,8 +462,9 @@ public class ClickGui extends Screen {
                 int trackY1 = viewY1 + 2, trackY2 = viewY2 - 2, trackH = trackY2 - trackY1;
                 int thumbH = Math.max(14, (int) (trackH * (trackH / (trackH + maxScroll))));
                 int thumbY = trackY1 + (int) ((trackH - thumbH) * (scrollY / maxScroll));
-                roundRect(ctx, viewX2 - 3, trackY1, viewX2 - 1, trackY2, 1, 0x25FFFFFF);
-                roundRect(ctx, viewX2 - 3, thumbY, viewX2 - 1, thumbY + thumbH, 1, ORANGE);
+                float sbA = 0.25f + 0.75f * Math.max(0f, Math.min(1f, 1f - (now - lastScrollMs - 700L) / 400f));
+                roundRect(ctx, viewX2 - 3, trackY1, viewX2 - 1, trackY2, 1, scaleAlpha(0x25FFFFFF, sbA));
+                roundRect(ctx, viewX2 - 3, thumbY, viewX2 - 1, thumbY + thumbH, 1, scaleAlpha(ORANGE, sbA));
             }
         } else {
             maxScroll = 0;
@@ -429,7 +476,9 @@ public class ClickGui extends Screen {
             ctx.disableScissor();
         }
 
+        drawSparks(ctx, now);
         m.pop();   // koniec animacji otwarcia
+        uiAlpha = 1f;
         if (colorPicker != null) drawColorPicker(ctx, mouseX, mouseY);
 
         if (closing && cp >= 1f) finishClose();
@@ -455,6 +504,13 @@ public class ClickGui extends Screen {
     }
     private void drawColorPicker(DrawContext c, int mx, int my) {
         int x=colorPickerX, y=colorPickerY;
+        float cpT = Math.min(1f, (Util.getMeasuringTimeMs() - colorPickerOpenMs) / 240f);
+        float cpS = 0.88f + 0.12f * easeOutBack(cpT, 1.8f);
+        var cpm = c.getMatrices();
+        cpm.push();
+        cpm.translate(x + 95f, y + 79f, 0f);
+        cpm.scale(cpS, cpS, 1f);
+        cpm.translate(-(x + 95f), -(y + 79f), 0f);
         roundRect(c,x,y,x+190,y+158,8,0xF414171D); roundRing(c,x,y,x+190,y+158,8,ORANGE);
         drawSmallText(c,fnt("Color Picker"),x+10,y+8,0xFFFFFFFF,0.9f);
         float[] hsb=Color.RGBtoHSB((colorPicker.rgb()>>16)&255,(colorPicker.rgb()>>8)&255,colorPicker.rgb()&255,null);
@@ -470,6 +526,13 @@ public class ClickGui extends Screen {
         drawSmallText(c,fnt(copyLabel),x+117+(int)((30-UiFont.width(textRenderer,fnt(copyLabel))*0.65f)/2f),y+134,0xFFFFFFFF,0.65f);
         drawSmallText(c,fnt(pasteLabel),x+149+(int)((32-UiFont.width(textRenderer,fnt(pasteLabel))*0.65f)/2f),y+134,0xFFFFFFFF,0.65f);
         roundRect(c,x+169,y+6,x+182,y+19,4,colorPicker.argb());
+        cpm.pop();
+    }
+
+    @Override
+    public void removed() {
+        uiAlpha = 1f;
+        super.removed();
     }
 
     private void finishClose() {
@@ -488,11 +551,7 @@ public class ClickGui extends Screen {
 
     private float expandProgress(Module mod) {
         float target = EXPANDED.contains(mod) ? 1f : 0f;
-        float cur = expandAnim.getOrDefault(mod, target);       // pierwszy raz: bez animacji
-        cur += (target - cur) * (1f - (float) Math.exp(-dt * 16f));
-        if (Math.abs(target - cur) < 0.004f) cur = target;
-        expandAnim.put(mod, cur);
-        return cur;
+        return Math.max(0f, spring(mod, 5, target, 170f, 19f));
     }
 
     private int drawModules(DrawContext ctx, int startX, int startY, int availW, int mouseX, int mouseY) {
@@ -514,6 +573,7 @@ public class ClickGui extends Screen {
         lists.add(left);
         if (!right.isEmpty()) { cats.add(selectedCategory == null ? Category.PLAYER : selectedCategory); lists.add(right); }
         int perRow = Math.max(1, (availW + COL_GAP) / (colW + COL_GAP));
+        int cardIdx = 0;
         int rowTop = startY;
         int rowBottom = startY;
 
@@ -540,15 +600,37 @@ public class ClickGui extends Screen {
             }
 
             for (Module mod : list) {
+                float tt = entranceT(0);   // wszystkie karty (obie kolumny) pojawiaja sie naraz, bez kolejki
+                cardIdx++;
+                float pop = easeOutBack(tt, 1.7f);
+                float prevAlpha = uiAlpha;
+                uiAlpha = prevAlpha * Math.min(1f, tt * tt * (3f - 2f * tt) * 1.3f);
+                var em = ctx.getMatrices();
+                em.push();
+                float emx = x + colW / 2f, emy = y + ROW_H / 2f;
+                em.translate(emx, emy + (1f - pop) * 14f, 0f);
+                float emS = 0.9f + 0.1f * pop;
+                em.scale(emS, emS, 1f);
+                em.translate(-emx, -emy, 0f);
                 boolean expanded = EXPANDED.contains(mod);
                 boolean hover = mouseX >= x && mouseX < x + colW && mouseY >= y && mouseY < y + ROW_H;
                 boolean editing = bindModule == mod;
                 if (editing) {
                     drawBindEditor(ctx, x, y, mod, mouseX, mouseY);
                 } else {
-                    drawCard(ctx, x, y, colW, ROW_H, mod, mod.isEnabled(), hover, !(mod instanceof GuiModule));
+                    float hs = Math.max(0f, spring(mod, 1, hover ? 1f : 0f, 240f, 20f));
+                    var cm = ctx.getMatrices();
+                    cm.push();
+                    cm.translate(0f, -hs * 1.6f, 0f);                       // karta "unosi sie" pod kursorem
+                    drawCard(ctx, x, y, colW, ROW_H, mod, mod.isEnabled(), Math.min(1f, hs), !(mod instanceof GuiModule));
                     drawModuleLabel(ctx, mod, x, y);
-                    hits.add(new Hit(x, y, x + colW, y + ROW_H, (mod instanceof GuiModule) ? null : mod::toggle, () -> {
+                    cm.pop();
+                    final int sparkX = x + colW - 13, sparkY = y + ROW_H / 2;
+                    Runnable leftAct = (mod instanceof GuiModule) ? null : () -> {
+                        if (!mod.isEnabled()) spawnSparks(sparkX, sparkY);
+                        mod.toggle();
+                    };
+                    hits.add(new Hit(x, y, x + colW, y + ROW_H, leftAct, () -> {
                         if (mod instanceof WaypointManager) {
                             currentTab = Tab.WAYPOINTS;
                             slideDir = 1; scrollY = 0; scrollTarget = 0;
@@ -564,30 +646,47 @@ public class ClickGui extends Screen {
                 // animowane rozwijanie ustawien: odslaniane przez przycinanie do rosnacej wysokosci
                 float prog = mod.settings.isEmpty() ? 0f : expandProgress(mod);
                 if (prog > 0f) {
-                    float eased = prog * prog * (3f - 2f * prog);
+                    float eased = prog;   // sprezyna: lekki overshoot = elastyczne rozwijanie
                     int fullH = 2 + shownSettings(mod) * (SET_H + 2);
                     int animH = Math.round(fullH * eased);
                     if (animH > 0) {
                         ctx.enableScissor(x, y, x + colW, y + animH);
                         int sx = x + 6, sw = colW - 6;
                         int sy = y;
+                        int rowIdx = 0;
+                        float setAlpha0 = uiAlpha;
+                        int nShown = shownSettings(mod);
                         for (Setting s : mod.settings) {
                             if (s.hidden) continue;
+                            float rt = Math.max(0f, Math.min(1f, prog * (1f + 0.5f * nShown) - 0.5f * rowIdx));
+                            float rtE = rt * rt * (3f - 2f * rt);
+                            rowIdx++;
+                            var rm = ctx.getMatrices();
+                            rm.push();
+                            rm.translate((1f - rtE) * 14f, 0f, 0f);          // ustawienia wjezdzaja kolejno z boku
+                            uiAlpha = setAlpha0 * rtE;
                             boolean visible = sy + SET_H <= y + animH;       // klikalne tylko gdy w pelni odslonieto
                             boolean sh = visible && mouseX >= sx && mouseX < sx + sw && mouseY >= sy && mouseY < sy + SET_H;
                             if (s instanceof BoolSetting bs) {
-                                drawSettingBody(ctx, sx, sy, sw, bs.get(), settingHover(bs, sh));
-                                drawSmallText(ctx, fnt(bs.name), sx + 5, sy + 3, bs.get() ? 0xFFFFFFFF : TEXT_GREY, 0.86f);
-                                drawSwitch(ctx, sx + sw - 19, sy + 3, bs.get(), 0x99000000);
+                                float ba = animTo(boolAnim, bs, bs.get() ? 1f : 0f, 14f);
+                                drawCardBodyBlend(ctx, sx, sy, sw, SET_H, Math.min(9, SET_H / 2), false, ba, settingHover(bs, sh));
+                                drawSmallText(ctx, fnt(bs.name), sx + 5, sy + 3, lerpColor(TEXT_GREY, 0xFFFFFFFF, ba), 0.86f);
+                                drawSwitchSpring(ctx, sx + sw - 19, sy + 3, spring(bs, 4, bs.get() ? 1f : 0f, 300f, 19f), springVel(bs, 4), ba, 0x99000000);
                                 if (visible) hits.add(new Hit(sx, sy, sx + sw, sy + SET_H, bs::toggle, null, null));
                             } else if (s instanceof NumberSetting ns) {
-                                double frac = (ns.get() - ns.min) / (ns.max - ns.min);
+                                float fracT = (float) ((ns.get() - ns.min) / (ns.max - ns.min));
+                                float frac = animTo(sliderAnim, ns, fracT, (dragging != null && dragging.slider() == ns) ? 40f : 16f);
                                 float nh = settingHover(ns, sh);
                                 drawSettingBody(ctx, sx, sy, sw, false, nh);
-                                int fw = (int) ((sw - 2) * frac);
+                                int fw = Math.round((sw - 2) * frac);
                                 if (fw > 0) {
                                     roundRectGradient(ctx, sx + 1, sy + 1, sx + 1 + Math.max(fw, 4), sy + SET_H - 1, Math.min(8, SET_H / 2 - 1),
                                             blendArgb(0xC8E8780C, 0xD8FF8E1F, nh), blendArgb(0xC8B85206, 0xD8D96A0A, nh), true);
+                                }
+                                if (fw > 0) {
+                                    int knobX = sx + 1 + Math.max(fw, 4);
+                                    roundRect(ctx, knobX - 5, sy + 1, knobX + 1, sy + SET_H - 1, 3f, scaleAlpha(0xFFFFB066, 0.10f + 0.30f * nh));
+                                    roundRect(ctx, knobX - 3, sy + 2, knobX, sy + SET_H - 2, 1.5f, scaleAlpha(0xFFFFFFFF, 0.30f + 0.65f * nh));
                                 }
                                 drawSmallText(ctx, fnt(ns.name), sx + 5, sy + 3, 0xFFFFFFFF, 0.86f);
                                 String val = format(ns.get());
@@ -600,7 +699,7 @@ public class ClickGui extends Screen {
                                 roundRect(ctx, swx - 1, sy + 1, swx + 19, sy + SET_H - 1, 4, 0xFF090B0F);
                                 roundRing(ctx, swx - 1, sy + 1, swx + 19, sy + SET_H - 1, 4, OUTLINE);
                                 roundRect(ctx, swx + 2, sy + 3, swx + 16, sy + SET_H - 3, 2, cs.argb());
-                                if (visible) { final int pickerRowY = sy; hits.add(new Hit(sx, sy, sx + sw, sy + SET_H, () -> { colorPicker = cs; colorPickerX = Math.min(width - 190, sx + sw + 8); colorPickerY = Math.min(height - 175, pickerRowY); hexText = String.format("%06X", cs.rgb()); hexEditing = false; }, null, null)); }
+                                if (visible) { final int pickerRowY = sy; hits.add(new Hit(sx, sy, sx + sw, sy + SET_H, () -> { colorPicker = cs; colorPickerOpenMs = Util.getMeasuringTimeMs(); colorPickerX = Math.min(width - 190, sx + sw + 8); colorPickerY = Math.min(height - 175, pickerRowY); hexText = String.format("%06X", cs.rgb()); hexEditing = false; }, null, null)); }
                             } else if (s instanceof ModeSetting ms) {
                                 drawSettingBody(ctx, sx, sy, sw, false, settingHover(ms, sh));
                                 drawSmallText(ctx, fnt(ms.name), sx + 5, sy + 3, 0xFFFFFFFF, 0.86f);
@@ -628,12 +727,16 @@ public class ClickGui extends Screen {
                                 UiFont.draw(ctx, textRenderer, at, sx + (sw - UiFont.width(textRenderer, at)) / 2, sy + 3, 0xFFFFFFFF);
                                 if (visible) hits.add(new Hit(sx, sy, sx + sw, sy + SET_H, as.action, null, null));
                             }
+                            rm.pop();
+                            uiAlpha = setAlpha0;
                             sy += SET_H + 2;
                         }
                         ctx.disableScissor();
                     }
                     y += animH;
                 }
+                em.pop();
+                uiAlpha = prevAlpha;
             }
             rowBottom = Math.max(rowBottom, y);
         }
@@ -758,6 +861,85 @@ public class ClickGui extends Screen {
         return y + 12;
     }
 
+    // ------------------------------------------------------------------ zakladka Configs
+
+    private int drawConfigs(DrawContext ctx, int x, int y0, int availW, int mouseX, int mouseY) {
+        int y = y0;
+        int h = 18;
+        int saveW = 48;
+        int fieldW = Math.max(80, Math.min(190, availW - saveW - 6));
+        boolean focused = focus == Focus.CONFIG_NEW;
+        roundRect(ctx, x, y, x + fieldW, y + h, 8, focused ? ORANGE : OUTLINE);
+        roundRect(ctx, x + 1, y + 1, x + fieldW - 1, y + h - 1, 7, 0x990A0705);
+        String shown = configInput.isEmpty() && !focused ? "Config name..." : configInput;
+        boolean caret = focused && (Util.getMeasuringTimeMs() / 500L) % 2 == 0;
+        UiFont.draw(ctx, textRenderer, fnt(shown + (caret ? "_" : "")), x + 8, y + 5,
+                configInput.isEmpty() && !focused ? TEXT_DIM : 0xFFFFFFFF);
+        hits.add(new Hit(x, y, x + fieldW, y + h, () -> focus = Focus.CONFIG_NEW, null, null));
+
+        int bx = x + fieldW + 6;
+        boolean hoverSave = mouseX >= bx && mouseX < bx + saveW && mouseY >= y && mouseY < y + h;
+        roundRectGradient(ctx, bx, y, bx + saveW, y + h, 8,
+                hoverSave ? 0xFFF28414 : 0xFFEC7D10, hoverSave ? 0xFFC96308 : 0xFFBF5A07, true);
+        UiFont.drawCentered(ctx, textRenderer, fnt("Save"), bx + saveW / 2, y + 5, 0xFFFFFFFF);
+        hits.add(new Hit(bx, y, bx + saveW, y + h, this::saveConfigFromInput, null, null));
+        y += h + 5;
+
+        if (Util.getMeasuringTimeMs() < statusUntil) {
+            UiFont.draw(ctx, textRenderer, fnt(statusMsg), x + 2, y, statusOk ? 0xFF7CE07C : 0xFFFF6B6B);
+        }
+        y += 13;
+
+        List<String> configs = ModuleManager.listConfigs();
+        UiFont.draw(ctx, textRenderer, fnt(Text.literal("Saved configs (" + configs.size() + ")").formatted(Formatting.BOLD)), x + 2, y, ORANGE);
+        ctx.fill(x + 2, y + 10, x + availW - 2, y + 11, 0x40FF8617);
+        y += 15;
+
+        int rowH = 25;
+        int delW = 32;
+        int loadW = 40;
+        int gap = 4;
+        for (String name : configs) {
+            boolean hover = mouseX >= x && mouseX < x + availW && mouseY >= y && mouseY < y + rowH;
+            drawCardBody(ctx, x, y, availW, rowH, 8, false, false, hover ? 1f : 0f);
+            int actionX = x + availW - 6 - delW;
+            int loadX = actionX - gap - loadW;
+            UiFont.draw(ctx, textRenderer, fnt(trim(name, Math.max(30, loadX - x - 12))), x + 7, y + 8, 0xFFFFFFFF);
+
+            boolean loadHover = mouseX >= loadX && mouseX < loadX + loadW && mouseY >= y && mouseY < y + rowH;
+            roundRectGradient(ctx, loadX, y + 3, loadX + loadW, y + rowH - 3, 6,
+                    loadHover ? 0xFFF28414 : 0xFFB85B0A, loadHover ? 0xFFC96308 : 0xFF7F3A08, true);
+            UiFont.drawCentered(ctx, textRenderer, fnt("Load"), loadX + loadW / 2, y + 9, 0xFFFFFFFF);
+            hits.add(new Hit(loadX, y, loadX + loadW, y + rowH, () -> {
+                boolean ok = ModuleManager.loadConfig(name);
+                setStatus(ok ? "Loaded " + name : "Could not load " + name, ok);
+            }, null, null));
+
+            boolean delHover = mouseX >= actionX && mouseX < actionX + delW && mouseY >= y && mouseY < y + rowH;
+            roundRect(ctx, actionX, y + 3, actionX + delW, y + rowH - 3, 6, delHover ? 0xFF7A2525 : 0xFF3C2528);
+            UiFont.drawCentered(ctx, textRenderer, fnt("Del"), actionX + delW / 2, y + 9, delHover ? 0xFFFFAAAA : 0xFFFF7777);
+            hits.add(new Hit(actionX, y, actionX + delW, y + rowH, () -> {
+                boolean ok = ModuleManager.deleteConfig(name);
+                setStatus(ok ? "Deleted " + name : "Could not delete " + name, ok);
+            }, null, null));
+            y += rowH + 4;
+        }
+
+        if (configs.isEmpty()) {
+            UiFont.draw(ctx, textRenderer, fnt("No saved configs yet. Enter a name and press Save."), x + 2, y + 2, TEXT_DIM);
+            y += 16;
+        }
+        UiFont.draw(ctx, textRenderer, fnt("Load applies modules, binds and settings."), x + 2, y + 2, TEXT_DIM);
+        return y + 14;
+    }
+
+    private void saveConfigFromInput() {
+        String name = configInput.trim();
+        boolean ok = ModuleManager.saveConfig(name);
+        setStatus(ok ? "Saved " + name : "Enter a valid config name", ok);
+        if (ok) focus = Focus.NONE;
+    }
+
     private int drawFriends(DrawContext ctx, int x, int y0, int availW, int mouseX, int mouseY) {
         int y = y0, h = 16, btnW = 40;
         int fieldW = Math.max(60, Math.min(150, availW - btnW - 6));
@@ -834,15 +1016,115 @@ public class ClickGui extends Screen {
         statusUntil = Util.getMeasuringTimeMs() + 3000L;
     }
 
-    private void drawCard(DrawContext ctx, int x, int y, int w, int h, Module mod, boolean enabled, boolean hover, boolean showSwitch) {
-        float target = hover ? 1f : 0f;
-        float amount = hoverAnim.getOrDefault(mod, 0f);
-        amount += (target - amount) * (1f - (float) Math.exp(-dt * 22f));
-        if (Math.abs(target - amount) < 0.008f) amount = target;
-        hoverAnim.put(mod, amount);
+    private void drawCard(DrawContext ctx, int x, int y, int w, int h, Module mod, boolean enabled, float amount, boolean showSwitch) {
+        float enTarget = enabled ? 1f : 0f;
+        float en = enableAnim.getOrDefault(mod, enTarget);
+        en += (enTarget - en) * (1f - (float) Math.exp(-dt * 12f));
+        if (Math.abs(enTarget - en) < 0.005f) en = enTarget;
+        enableAnim.put(mod, en);
 
-        drawCardBody(ctx, x, y, w, h, enabled, amount);
-        if (showSwitch) drawSwitch(ctx, x + w - 20, y + (h - 7) / 2, enabled, 0x99000000);
+        // poswiata pod wlaczona karta (oddycha, kazda karta w innej fazie)
+        if (en > 0.02f) {
+            float pulse = 0.7f + 0.3f * (float) Math.sin(Util.getMeasuringTimeMs() / 900.0 + (mod.name.hashCode() % 100) * 0.1);
+            for (int i = 3; i >= 1; i--) {
+                int ga = Math.round(0x2C * (1f - i / 4f) * en * pulse);
+                roundRing(ctx, x - i, y - i, x + w + i, y + h + i, 9 + i, (ga << 24) | 0xFF8617);
+            }
+        }
+        drawCardBodyBlend(ctx, x, y, w, h, 9, true, en, amount);
+        // pasek akcentu z lewej - rosnie ze srodka po wlaczeniu
+        float barH = (h - 14) * en;
+        if (barH >= 2f) {
+            int by1 = y + Math.round((h - barH) / 2f), by2 = y + Math.round((h + barH) / 2f);
+            roundRect(ctx, x + 3, by1, x + 5, by2, 1f, scaleAlpha(0xFFFFD19A, en));
+        }
+        if (showSwitch) {
+            float kp = spring(mod, 2, enTarget, 300f, 19f);
+            drawSwitchSpring(ctx, x + w - 20, y + (h - 7) / 2, kp, springVel(mod, 2), en, 0x99000000);
+        }
+    }
+
+    // ------------------------------------------------------------------ sprezyny i easing
+
+    /** Easing z lekkim przestrzeleniem (0..1 -> 0..1, w srodku > 1). */
+    private static float easeOutBack(float t, float k) {
+        if (t >= 1f) return 1f;
+        if (t <= 0f) return 0f;
+        float u = t - 1f;
+        return 1f + (k + 1f) * u * u * u + k * u * u;
+    }
+
+    /** Sprezyna lekko niedotlumiona (maly overshoot). Pierwsze wywolanie startuje w punkcie docelowym. */
+    private float spring(Object key, int id, float target, float k, float c) {
+        SK sk = new SK(key, id);
+        float[] st = springs.get(sk);
+        if (st == null) { st = new float[]{target, 0f}; springs.put(sk, st); }
+        float step = Math.min(dt, 0.04f);
+        int n = Math.max(1, (int) Math.ceil(step / 0.008f));
+        float h = step / n;
+        for (int i = 0; i < n; i++) {
+            float a = (target - st[0]) * k - st[1] * c;
+            st[1] += a * h;
+            st[0] += st[1] * h;
+        }
+        if (Math.abs(target - st[0]) < 0.0008f && Math.abs(st[1]) < 0.01f) { st[0] = target; st[1] = 0f; }
+        return st[0];
+    }
+
+    private float springVel(Object key, int id) {
+        float[] st = springs.get(new SK(key, id));
+        return st == null ? 0f : st[1];
+    }
+
+    private float animTo(Map<Setting, Float> map, Setting key, float target, float speed) {
+        float cur = map.getOrDefault(key, target);
+        cur += (target - cur) * (1f - (float) Math.exp(-dt * speed));
+        if (Math.abs(target - cur) < 0.004f) cur = target;
+        map.put(key, cur);
+        return cur;
+    }
+
+    /** Postep wejscia karty i (0..1) - kolejne karty startuja co 38 ms (maks. 10 krokow). */
+    private float entranceT(int i) {
+        long base = Math.max(openStart + 140L, Math.max(tabAnimStart, categoryAnimStart));
+        float p = (Util.getMeasuringTimeMs() - base - Math.min(i, 10) * 38L) / 420f;
+        return Math.max(0f, Math.min(1f, p));
+    }
+
+    /** Przelacznik: galka na sprezynie (przeskok + rozciaganie od predkosci), tor zmienia kolor plynnie. */
+    static void drawSwitchSpring(DrawContext c, int x, int y, float kp, float vel, float en, int onTrack) {
+        roundRect(c, x, y, x + 14, y + 7, 3.5f, lerpColor(0xFF3A2D24, onTrack, en));
+        int stretch = Math.round(Math.min(3f, Math.abs(vel) * 0.5f));
+        int kx = x + 1 + Math.round(7f * kp) - stretch / 2;
+        int kw = 5 + stretch;
+        kx = Math.max(x, Math.min(x + 14 - kw, kx));
+        roundRect(c, kx, y + 1, kx + kw, y + 6, 2.5f, lerpColor(0xFF8C837B, 0xFFFFFFFF, en));
+    }
+
+    private void spawnSparks(float x, float y) {
+        long now = Util.getMeasuringTimeMs();
+        for (int i = 0; i < 12; i++) {
+            double ang = Math.PI * 2.0 * i / 12.0 + Math.random() * 0.4;
+            float sp = 50f + (float) Math.random() * 70f;
+            sparks.add(new Spark(x, y, (float) Math.cos(ang) * sp, (float) Math.sin(ang) * sp - 20f,
+                    1f + (float) Math.random() * 1.2f, now));
+        }
+    }
+
+    /** Iskry wylatujace z przelacznika po wlaczeniu modulu (grawitacja + zanikanie). */
+    private void drawSparks(DrawContext ctx, long now) {
+        sparks.removeIf(sp -> now - sp.start() > 650L);
+        for (Spark sp : sparks) {
+            float life = (now - sp.start()) / 650f;
+            float t = (now - sp.start()) / 1000f;
+            float px = sp.x() + sp.vx() * t * (1f - 0.5f * life);
+            float py = sp.y() + sp.vy() * t + 90f * t * t;
+            int a = Math.round(0xE0 * (1f - life) * (1f - life));
+            float sz = sp.size() * (1f - 0.5f * life);
+            roundRect(ctx, Math.round(px - sz * 2.2f), Math.round(py - sz * 2.2f), Math.round(px + sz * 2.2f), Math.round(py + sz * 2.2f),
+                    sz * 2.2f, ((a / 4) << 24) | 0xFF8617);
+            roundRect(ctx, Math.round(px - sz), Math.round(py - sz), Math.round(px + sz), Math.round(py + sz), sz, (a << 24) | 0xFFC070);
+        }
     }
 
     /** Tlo karty (halo hover, polprzezroczysty gradient, obwodka) - wspolne dla modulow i przyciskow kategorii. */
@@ -851,21 +1133,23 @@ public class ClickGui extends Screen {
     }
 
     static void drawCardBody(DrawContext ctx, int x, int y, int w, int h, int r, boolean halo, boolean enabled, float amount) {
+        drawCardBodyBlend(ctx, x, y, w, h, r, halo, enabled ? 1f : 0f, amount);
+    }
+
+    /** To samo co drawCardBody, ale stan ON/OFF jest plynny (en 0..1) zamiast skokowy. */
+    static void drawCardBodyBlend(DrawContext ctx, int x, int y, int w, int h, int r, boolean halo, float en, float amount) {
         // Soft hover halo fades in/out independently of the enabled state.
         if (halo && amount > 0.01f) {
             int alpha = Math.round(0x45 * amount);
             roundRing(ctx, x - 1, y - 1, x + w + 1, y + h + 1, 10, (alpha << 24) | 0xFF8A32);
         }
         // Translucent card fill: do not paint an opaque outline color over the game world.
-        roundRect(ctx, x, y, x + w, y + h, r, enabled ? 0xDFFF8C1A : 0x50343B45);
-        if (enabled) {
-            roundRectGradient(ctx, x + 1, y + 1, x + w - 1, y + h - 1, r - 1,
-                    blendArgb(0xA8E8780C, 0xB8FF8E1F, amount), blendArgb(0xA8B85206, 0xB8D96A0A, amount), true);
-        } else {
-            roundRectGradient(ctx, x + 1, y + 1, x + w - 1, y + h - 1, r - 1,
-                    blendArgb(0x301A120C, 0x40261A12, amount), blendArgb(0x30110B08, 0x401A110B, amount), true);
-        }
-        roundRing(ctx, x, y, x + w, y + h, r, enabled ? 0xFFFF8617 : 0xB0343B45);
+        roundRect(ctx, x, y, x + w, y + h, r, lerpColor(0x50343B45, 0xDFFF8C1A, en));
+        int onTop = blendArgb(0xA8E8780C, 0xB8FF8E1F, amount), onBot = blendArgb(0xA8B85206, 0xB8D96A0A, amount);
+        int offTop = blendArgb(0x301A120C, 0x40261A12, amount), offBot = blendArgb(0x30110B08, 0x401A110B, amount);
+        roundRectGradient(ctx, x + 1, y + 1, x + w - 1, y + h - 1, r - 1,
+                lerpColor(offTop, onTop, en), lerpColor(offBot, onBot, en), true);
+        roundRing(ctx, x, y, x + w, y + h, r, lerpColor(0xB0343B45, 0xFFFF8617, en));
     }
 
     /** Plynny postep hovera dla pojedynczego ustawienia (jak przy kartach modulow). */
@@ -894,9 +1178,7 @@ public class ClickGui extends Screen {
 
     /** Maly przelacznik 14x7 (onTrack = kolor toru w stanie ON). */
     static void drawSwitch(DrawContext c, int x, int y, boolean on, int onTrack) {
-        roundRect(c, x, y, x + 14, y + 7, 3.5f, on ? onTrack : 0xFF3A2D24);
-        int kx = on ? x + 8 : x + 1;
-        roundRect(c, kx, y + 1, kx + 5, y + 6, 2.5f, on ? 0xFFFFFFFF : 0xFF8C837B);
+        drawSwitchSpring(c, x, y, on ? 1f : 0f, 0f, on ? 1f : 0f, onTrack);
     }
 
     private void drawIcon(DrawContext ctx, float cx, float cy, float fruitPx) {
@@ -905,6 +1187,7 @@ public class ClickGui extends Screen {
         var m = ctx.getMatrices();
         m.push();
         m.translate(cx, cy, 0f);
+        m.multiply(RotationAxis.POSITIVE_Z.rotationDegrees((float) Math.sin(Util.getMeasuringTimeMs() / 1100.0) * 7f));
         m.scale(scale, scale, 1f);
         ctx.drawTexture(RenderLayer::getGuiTextured, ORANGE_SMALL_TEX,
                 -SZ / 2, -SZ / 2, 0f, 0f, SZ, SZ, SZ, SZ);
@@ -1006,6 +1289,7 @@ public class ClickGui extends Screen {
         float R = Math.max(0f, Math.min(r * S, Math.min(W, H) / 2f));
         int rc = (int) Math.min(Math.ceil(R), H / 2);
         int tr = roundTop ? rc : 0, br = roundBottom ? rc : 0;
+        if (uiAlpha < 0.999f) { top = scaleAlpha(top, uiAlpha); bottom = scaleAlpha(bottom, uiAlpha); }
         boolean solid = top == bottom;
 
         var m = c.getMatrices();
@@ -1051,6 +1335,7 @@ public class ClickGui extends Screen {
 
     /** Pozioma linia zanikajaca ku koncom (najjasniejsza w srodku). */
     private static void fadeLine(DrawContext c, int x1, int x2, int y, int rgb, int maxAlpha) {
+        maxAlpha = Math.round(maxAlpha * uiAlpha);
         int S = pxScale();
         int X1 = x1 * S, W = (x2 - x1) * S, Y = y * S;
         int T = Math.max(1, Math.round(S * 0.75f));
@@ -1067,6 +1352,7 @@ public class ClickGui extends Screen {
 
     /** Samo obramowanie zaokraglonego prostokata - wnetrze zostaje nietkniete. */
     public static void roundRing(DrawContext c, int x1, int y1, int x2, int y2, float r, int color) {
+        if (uiAlpha < 0.999f) color = scaleAlpha(color, uiAlpha);
         int S = pxScale();
         int T = Math.max(1, Math.round(S * 0.75f));
         int X1 = x1 * S, Y1 = y1 * S, X2 = x2 * S, Y2 = y2 * S;
@@ -1138,45 +1424,99 @@ public class ClickGui extends Screen {
         matrices.push();
         matrices.translate(x, y, 0.0f);
         matrices.scale(scale, scale, 1.0f);
-        UiFont.draw(ctx, textRenderer, text, 0, 0, color);
+        UiFont.draw(ctx, textRenderer, text, 0, 0, scaleAlpha(color, uiAlpha));
         matrices.pop();
     }
 
     /** Short English descriptions shown below module names in the ClickGUI. */
     private String moduleDescription(Module mod) {
         return switch (mod.name.toLowerCase()) {
-            case "nametags" -> "Shows player names above their heads";
-            case "killaura" -> "Automatically attacks nearby entities";
-            case "autoweb" -> "Places cobwebs on nearby enemies";
-            case "aim assist" -> "Helps aim at nearby entities";
-            case "trigger bot" -> "Attacks entities when your crosshair is on them";
-            case "hitbox" -> "Changes the visible or selectable entity hitbox";
-            case "target margin" -> "Adjusts the target selection margin";
-            case "auto shield break" -> "Automatically breaks enemy shields";
-            case "auto logout" -> "Logs out when a threat is nearby";
-            case "potion refill" -> "Refills potion slots automatically";
-            case "backtrack" -> "Delays incoming packets for combat timing";
-            case "esp" -> "Highlights entities through the world";
-            case "tracers" -> "Draws lines to entities";
-            case "fullbright" -> "Brightens dark areas";
-            case "name protect" -> "Hides your name in supported displays";
-            case "auto tool" -> "Selects the best tool for the block";
-            case "fast break" -> "Speeds up block breaking where allowed";
-            case "fast place" -> "Reduces delay between block placements";
-            case "no push" -> "Prevents selected entity push effects";
-            case "auto rod" -> "Uses a fishing rod against targets";
-            case "block esp" -> "Highlights selected blocks";
-            case "item esp" -> "Highlights dropped items";
-            case "logout spots" -> "Marks locations where players logged out";
-            case "removals" -> "Hides selected visual effects";
-            default -> "Automates " + mod.name + " behavior";
+            case "triggerbot" -> "Auto-attacks when crosshair is on a target";
+            case "killaura" -> "Attacks nearby entities automatically";
+            case "aimassist" -> "Smoothly pulls your aim toward enemies";
+            case "autorod" -> "Aims fishing rod hook at the nearest player";
+            case "autoweb" -> "Places cobwebs at nearby players' feet";
+            case "autotrap" -> "Traps nearby players with blocks";
+            case "pearlchaser" -> "Tracks pearls and shows where they land";
+            case "fastlever" -> "Places a lever in water near a player";
+            case "hitbox" -> "Enlarges enemy hitboxes to hit easier";
+            case "kbdisplace" -> "Shifts knockback direction by offsetting yaw";
+            case "freecam" -> "Fly the camera while your body stays put";
+            case "flight" -> "Lets you fly (Vanilla, Glide, Creative)";
+            case "freelook" -> "Look around without turning your player";
+            case "fakelag" -> "Holds packets and sends them in bursts";
+            case "guimove" -> "Move while inventories and chests are open";
+            case "nojumpdelay" -> "Removes the delay between jumps";
+            case "sprint" -> "Sprints automatically while moving forward";
+            case "scaffold" -> "Places blocks under your feet as you walk";
+            case "timer" -> "Changes the game speed";
+            case "fastplace" -> "Removes the delay between block placements";
+            case "fastbreak" -> "Speeds up block breaking";
+            case "nopush" -> "Stops players and liquids from pushing you";
+            case "antitrap" -> "Clicks through entities, breaks webs/fences";
+            case "autotool" -> "Switches to the best tool for the block";
+            case "autototem" -> "Moves a totem to your offhand when needed";
+            case "autoarmor" -> "Equips the best armor from your inventory";
+            case "cheststealer" -> "Moves items from open chests to inventory";
+            case "autoleave" -> "Disconnects when another player is nearby";
+            case "autodripstone" -> "Places dripstone under a trapdoor fast";
+            case "errorkiller" -> "Clears obstacles in the way of block placing";
+            case "trail" -> "Rainbow ribbon of light behind you";
+            case "hitfx" -> "Custom stars, orbs and hearts when someone is hit";
+            case "handanimations" -> "Custom first-person swing animations";
+            case "esp" -> "Highlights players and mobs through walls";
+            case "chams" -> "Draws players through walls as colored models";
+            case "fakeplayer" -> "Spawns a local-only dummy player";
+            case "nocameraclip" -> "Camera passes through blocks in 3rd person";
+            case "itemesp" -> "Highlights dropped items through walls";
+            case "blockesp" -> "Highlights chosen blocks through walls";
+            case "logoutspots" -> "Marks where players vanished or logged out";
+            case "tracers" -> "Draws lines to players and mobs";
+            case "projectile trajectory" -> "Predicts flight paths of pearls and tridents";
+            case "targethud" -> "Shows health and info of your target";
+            case "waypoint manager" -> "Saves and displays waypoints in the world";
+            case "nametags" -> "Shows readable names above players' heads";
+            case "fullbright" -> "Makes dark areas fully bright";
+            case "nameprotect" -> "Replaces your name with custom text";
+            case "removals" -> "Hides overlays and visual effects";
+            case "spammer" -> "Sends a chat message every few seconds";
+            case "hud" -> "On-screen module list and notifications";
+            case "gui" -> "Opens the client menu with a keybind";
+            default -> "Module: " + mod.name;
         };
+    }
+
+    /** Dzieli tekst na linijki po slowach tak, zeby kazda miescila sie w maxW; ostatnia linia jest przycinana, gdy i tak za dluga. */
+    private java.util.List<String> wrapDescription(String text, int maxW, int maxLines) {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        String[] words = text.split(" ");
+        StringBuilder cur = new StringBuilder();
+        for (int i = 0; i < words.length; i++) {
+            String candidate = cur.length() == 0 ? words[i] : cur + " " + words[i];
+            if (cur.length() == 0 || UiFont.width(textRenderer, fnt(candidate)) <= maxW) {
+                cur.setLength(0);
+                cur.append(candidate);
+                continue;
+            }
+            if (lines.size() == maxLines - 1) {          // ostatnia dozwolona linia - reszta idzie do niej i jest przycinana
+                StringBuilder rest = new StringBuilder(cur);
+                for (int j = i; j < words.length; j++) rest.append(' ').append(words[j]);
+                lines.add(trim(rest.toString(), maxW));
+                return lines;
+            }
+            lines.add(trim(cur.toString(), maxW));
+            cur.setLength(0);
+            cur.append(words[i]);
+        }
+        if (cur.length() > 0) lines.add(trim(cur.toString(), maxW));
+        return lines;
     }
 
     /** Nazwa modulu + (gdy zbindowany) maly znacznik z klawiszem, np. "M5" albo "R". */
     private void drawModuleLabel(DrawContext ctx, Module mod, int x, int y) {
         String label = mod.name;
-        int labelCol = mod.isEnabled() ? 0xFFFFFFFF : TEXT_GREY;
+        float labelEn = enableAnim.getOrDefault(mod, mod.isEnabled() ? 1f : 0f);
+        int labelCol = scaleAlpha(lerpColor(TEXT_GREY, 0xFFFFFFFF, labelEn), uiAlpha);
         int left = x + 8;
         int right = x + colW - (mod instanceof GuiModule ? 8 : 24);   // tu zaczyna sie przelacznik (modul GUI go nie ma)
         int avail = right - left;
@@ -1205,13 +1545,19 @@ public class ClickGui extends Screen {
         UiFont.draw(ctx, textRenderer, fnt(label), 0, 0, labelCol);
         mm.pop();
         String description = moduleDescription(mod);
-        drawSmallText(ctx, fnt(trim(description, colW - 16)), x + 8, y + 23, TEXT_DIM, 0.86f);
+        // za dlugi opis nie ucina sie, tylko przechodzi do drugiej linijki (max 2 linie, karta ma stala wysokosc)
+        java.util.List<String> descLines = wrapDescription(description, colW - 16, 2);
+        int descY = descLines.size() > 1 ? y + 19 : y + 23;
+        for (String line : descLines) {
+            drawSmallText(ctx, fnt(line), x + 8, descY, TEXT_DIM, 0.86f);
+            descY += 9;
+        }
 
         if (tag != null) {
             mm.push();
             mm.translate(right - tagW, y + (ROW_H - 8 * ts) / 2f, 0f);
             mm.scale(ts, ts, 1f);
-            UiFont.draw(ctx, textRenderer, fnt(tag), 0, 0, mod.isEnabled() ? 0xFFFFE0C0 : 0xFFE0A060);
+            UiFont.draw(ctx, textRenderer, fnt(tag), 0, 0, scaleAlpha(lerpColor(0xFFE0A060, 0xFFFFE0C0, labelEn), uiAlpha));
             mm.pop();
         }
     }
@@ -1301,7 +1647,21 @@ public class ClickGui extends Screen {
                 bindModule = null;
                 return true;
             }
-            bindModule = null;      // srodkowy: zamknij, a nizej ewentualnie otworz dla kliknietego modulu
+            // srodkowy przycisk (nacisniecie kolka): na karcie INNEGO modulu przelacza edycje na niego,
+            // w kazdym innym miejscu (w tym na edytowanym module) przypisuje kolko jako bind (M3)
+            boolean overOther = false;
+            if (mouseX >= viewX1 && mouseX < viewX2 && mouseY >= viewY1 && mouseY < viewY2) {
+                for (BindHit bh : bindHits) {
+                    if (bh.contains(mouseX, mouseY) && bh.mod() != bindModule) { overOther = true; break; }
+                }
+            }
+            if (!overOther) {
+                bindModule.setBind(InputUtil.Type.MOUSE.createFromCode(GLFW.GLFW_MOUSE_BUTTON_MIDDLE));
+                bindModule = null;
+                ModuleManager.save();
+                return true;
+            }
+            bindModule = null;
         }
         if (colorPicker != null) {
             int x = colorPickerX, y = colorPickerY;
@@ -1357,6 +1717,7 @@ public class ClickGui extends Screen {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         if (closing) return true;
+        lastScrollMs = Util.getMeasuringTimeMs();
         scrollTarget = Math.max(0f, Math.min(maxScroll, scrollTarget - (float) verticalAmount * 26f));
         return true;
     }
@@ -1402,6 +1763,11 @@ public class ClickGui extends Screen {
             return true;
         }
         if (focus == Focus.WP_NEW && chr >= 32 && chr != 127 && wpInput.length() < 32) { wpInput += chr; return true; }
+        if (focus == Focus.CONFIG_NEW && configInput.length() < 24
+                && (Character.isLetterOrDigit(chr) || chr == ' ' || chr == '_' || chr == '-')) {
+            configInput += chr;
+            return true;
+        }
         if (focus == Focus.WP_EDIT && chr >= 32 && chr != 127) {
             WaypointManager wm = ModuleManager.get(WaypointManager.class);
             if (wm != null && wpEditIdx >= 0 && wpEditIdx < wm.getWaypoints().size()) {
@@ -1434,6 +1800,7 @@ public class ClickGui extends Screen {
                 if (focus == Focus.SEARCH && !query.isEmpty()) query = query.substring(0, query.length() - 1);
                 if (focus == Focus.FRIEND && !friendInput.isEmpty()) friendInput = friendInput.substring(0, friendInput.length() - 1);
                 if (focus == Focus.WP_NEW && !wpInput.isEmpty()) wpInput = wpInput.substring(0, wpInput.length() - 1);
+                if (focus == Focus.CONFIG_NEW && !configInput.isEmpty()) configInput = configInput.substring(0, configInput.length() - 1);
                 if (focus == Focus.WP_EDIT) {
                     WaypointManager wm = ModuleManager.get(WaypointManager.class);
                     if (wm != null && wpEditIdx >= 0 && wpEditIdx < wm.getWaypoints().size()) {
@@ -1465,6 +1832,9 @@ public class ClickGui extends Screen {
                 } else if (focus == Focus.FRIEND) {
                     String f = clip.replaceAll("[^A-Za-z0-9_]", "");
                     friendInput = (friendInput + f).substring(0, Math.min(16, friendInput.length() + f.length()));
+                } else if (focus == Focus.CONFIG_NEW) {
+                    String f = clip.replaceAll("[^A-Za-z0-9 _-]", "");
+                    configInput = (configInput + f).substring(0, Math.min(24, configInput.length() + f.length()));
                 } else {
                     query = (query + clip).substring(0, Math.min(24, query.length() + clip.length()));
                 }
@@ -1472,6 +1842,7 @@ public class ClickGui extends Screen {
             }
             if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
                 if (focus == Focus.FRIEND) addFriendFromInput();
+                else if (focus == Focus.CONFIG_NEW) saveConfigFromInput();
                 else if (focus == Focus.WP_NEW) {
                     WaypointManager wm = ModuleManager.get(WaypointManager.class);
                     if (wm != null) { wm.createAtPlayer(client, wpInput); wpInput = ""; }

@@ -3,8 +3,13 @@ package com.example.orangeclient.module.player;
 import com.example.orangeclient.OrangeClient;
 import com.example.orangeclient.module.Category;
 import com.example.orangeclient.module.Module;
+import com.example.orangeclient.setting.NumberSetting;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.block.AbstractPressurePlateBlock;
 import net.minecraft.block.Block;
+import net.minecraft.block.ButtonBlock;
+import net.minecraft.block.LeverBlock;
+import net.minecraft.block.TripwireHookBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
@@ -16,21 +21,44 @@ import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 
 /**
- * Port moda "Error Killer" (errorkiller 1.11.1 dla MC 1.21.4, autor: sigmapowazna, licencja MIT) na modul klienta.
+ * Port moda "Error Killer" (errorkiller 1.11.1 dla MC 1.21.4, autor: sigmapowazna, licencja MIT).
  *
- * Gdy stawiasz blok i miejsce docelowe jest "blokiem-celem" (ta sama klasa, co w oryginalnym modzie),
- * zwykle uzycie jest anulowane, a zamiast niego - wszystko w jednym ticku:
- *   1) przelaczamy sie na wiadro z woda/lawa z paska i uzywamy je (postawienie plynu),
- *   2) uzywamy je ponownie (odebranie plynu),
- *   3) wracamy na slot z blokiem i stawiamy blok w to samo miejsce.
+ * Gdy chcesz postawic blok, a w docelowej komorce stoi przeszkoda (dzwignia, przycisk, plytka,
+ * tripwire), mod stawia tam wode, zbiera ja z powrotem, a na koncu stawia twoj blok.
+ *
+ * Delay:
+ *   0 = wszystko w jednym ticku (zachowanie oryginalnego moda, najszybciej)
+ *   1-3 = przerwa w tickach miedzy krokami (wolniej, ale stabilniej na serwerze)
  */
 public class ErrorKiller extends Module {
-    /** Klasa "bloku-celu" z oryginalnego moda (net.minecraft.class_2401), rozwiazywana niezaleznie od mapowan. */
+    /** Przerwa miedzy krokami w tickach: 0 = od razu, 3 = najwolniej. */
+    private final NumberSetting delay = add(new NumberSetting("Delay", 0, 0, 3, 1));
+
     private static Class<?> targetClass;
     private static boolean targetResolved;
 
+    // 0 = idle, 1 = plyn postawiony (czekamy na zbieranie), 2 = plyn zebrany (czekamy na blok)
+    private int phase;
+    private int cooldown;
+    private int blockSlot = -1;
+    private int fluidSlot = -1;
+    private BlockHitResult target;
+
     public ErrorKiller() {
         super("ErrorKiller", Category.PLAYER);
+    }
+
+    @Override
+    protected void onDisable() {
+        reset();
+    }
+
+    private void reset() {
+        phase = 0;
+        cooldown = 0;
+        blockSlot = -1;
+        fluidSlot = -1;
+        target = null;
     }
 
     /**
@@ -38,44 +66,96 @@ public class ErrorKiller extends Module {
      * @return true, jesli zwykle uzycie przedmiotu ma zostac anulowane
      */
     public boolean tryIntercept(MinecraftClient mc) {
-        if (mc.player == null || mc.world == null || mc.interactionManager == null || mc.crosshairTarget == null) return false;
-        if (mc.crosshairTarget.getType() != HitResult.Type.BLOCK) return false;
+        if (mc.player == null || mc.world == null || mc.interactionManager == null) return false;
+        if (phase != 0) return true;
+
+        if (mc.crosshairTarget == null || mc.crosshairTarget.getType() != HitResult.Type.BLOCK) return false;
 
         ItemStack main = mc.player.getStackInHand(Hand.MAIN_HAND);
         if (!(main.getItem() instanceof BlockItem)) return false;
 
-        BlockHitResult target = (BlockHitResult) mc.crosshairTarget;
-        BlockPos placePos = target.getBlockPos().offset(target.getSide());
-        if (!isTargetBlock(mc.world.getBlockState(placePos).getBlock())) return false;
+        BlockHitResult hit = (BlockHitResult) mc.crosshairTarget;
+        BlockPos pos = hit.getBlockPos().offset(hit.getSide());
+        if (!isTargetBlock(mc.world.getBlockState(pos).getBlock())) return false;
 
-        run(mc, target, mc.player.getInventory().selectedSlot);
+        int bucket = findBucket(mc);
+        if (bucket == -1) {
+            mc.player.sendMessage(Text.literal("§c[Error Killer] Brak wiadra z woda/lawa!"), true);
+            return false;
+        }
+
+        blockSlot = mc.player.getInventory().selectedSlot;
+        fluidSlot = bucket;
+        target = hit;
+
+        // Krok 1: przelacz na wiadro i postaw plyn.
+        switchTo(mc, fluidSlot);
+        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+
+        int d = (int) delay.get();
+        if (d <= 0) {
+            // Delay 0: robimy wszystko od razu, tak jak oryginalny mod.
+            pickUp(mc);
+            placeBlock(mc);
+        } else {
+            phase = 1;
+            cooldown = d;
+        }
         return true;
     }
 
-    private void run(MinecraftClient mc, BlockHitResult target, int blockSlot) {
-        int liquidSlot = -1;
-        for (int i = 0; i < 9; i++) {
-            ItemStack s = mc.player.getInventory().getStack(i);
-            if (s.isOf(Items.WATER_BUCKET) || s.isOf(Items.LAVA_BUCKET)) {
-                liquidSlot = i;
-                break;
-            }
+    @Override
+    public void onTick(MinecraftClient mc) {
+        if (phase == 0) return;
+        if (mc.player == null || mc.world == null || mc.interactionManager == null) {
+            reset();
+            return;
         }
-        if (liquidSlot == -1) {
-            mc.player.sendMessage(Text.literal("§c[Error Killer] No water or lava bucket in hotbar!"), true);
+        if (cooldown > 0) {
+            cooldown--;
             return;
         }
 
-        int prev = mc.player.getInventory().selectedSlot;
-        mc.player.getInventory().selectedSlot = liquidSlot;
-        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND); // postaw plyn
-        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND); // odbierz plyn
-        mc.player.getInventory().selectedSlot = blockSlot;
-        mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, target);
-        mc.player.getInventory().selectedSlot = prev;
+        if (phase == 1) {
+            pickUp(mc);
+            phase = 2;
+            cooldown = (int) delay.get();
+        } else {
+            placeBlock(mc);
+        }
+    }
+
+    private void pickUp(MinecraftClient mc) {
+        switchTo(mc, fluidSlot);
+        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+    }
+
+    private void placeBlock(MinecraftClient mc) {
+        switchTo(mc, blockSlot);
+        if (target != null) mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, target);
+        reset();
+    }
+
+    private static void switchTo(MinecraftClient mc, int slot) {
+        if (slot >= 0 && slot < 9) mc.player.getInventory().selectedSlot = slot;
+    }
+
+    private static int findBucket(MinecraftClient mc) {
+        for (int i = 0; i < 9; i++) {
+            ItemStack s = mc.player.getInventory().getStack(i);
+            if (s.isOf(Items.WATER_BUCKET) || s.isOf(Items.LAVA_BUCKET)) return i;
+        }
+        return -1;
     }
 
     private static boolean isTargetBlock(Block block) {
+        if (block instanceof ButtonBlock
+                || block instanceof AbstractPressurePlateBlock
+                || block instanceof LeverBlock
+                || block instanceof TripwireHookBlock) {
+            return true;
+        }
+
         if (!targetResolved) {
             targetResolved = true;
             try {

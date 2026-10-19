@@ -48,6 +48,9 @@ import com.example.orangeclient.module.render.Removals;
 import com.example.orangeclient.module.render.Tracers;
 import com.example.orangeclient.module.render.ProjectileTrajectory;
 import com.example.orangeclient.module.render.TargetHUD;
+import com.example.orangeclient.module.render.HitFX;
+import com.example.orangeclient.module.render.HandAnimations;
+import com.example.orangeclient.module.render.Trail;
 import com.example.orangeclient.module.render.WaypointManager;
 import com.example.orangeclient.setting.ActionSetting;
 import com.example.orangeclient.setting.Setting;
@@ -106,6 +109,9 @@ public final class ModuleManager {
         MODULES.add(new AutoDripstone());
         MODULES.add(new ErrorKiller());
         MODULES.add(new ESP());
+        MODULES.add(new HitFX());
+        MODULES.add(new HandAnimations());
+        MODULES.add(new Trail());
         MODULES.add(new Chams());
         MODULES.add(new FakePlayer());
         MODULES.add(new NoCameraClip());
@@ -199,6 +205,115 @@ public final class ModuleManager {
             Files.writeString(file(), GSON.toJson(root));
         } catch (Exception e) {
             OrangeClient.LOGGER.error("Nie udalo sie zapisac configu", e);
+        }
+    }
+
+    private static Path configsDir() {
+        return FabricLoader.getInstance().getConfigDir().resolve("orangeclient").resolve("configs");
+    }
+
+    private static String cleanConfigName(String name) {
+        if (name == null) return "";
+        String clean = name.trim().replaceAll("[^A-Za-z0-9 _-]", "").trim();
+        if (clean.length() > 24) clean = clean.substring(0, 24).trim();
+        return clean;
+    }
+
+    /** Named configs are separate profiles; the existing orangeclient.json remains the autosave. */
+    public static List<String> listConfigs() {
+        Path dir = configsDir();
+        if (!Files.isDirectory(dir)) return List.of();
+        try (var files = Files.list(dir)) {
+            return files.filter(Files::isRegularFile)
+                    .map(p -> p.getFileName().toString())
+                    .filter(n -> n.toLowerCase(java.util.Locale.ROOT).endsWith(".json"))
+                    .map(n -> n.substring(0, n.length() - 5))
+                    .sorted(String.CASE_INSENSITIVE_ORDER)
+                    .toList();
+        } catch (Exception e) {
+            OrangeClient.LOGGER.error("Nie udalo sie odczytac configow", e);
+            return List.of();
+        }
+    }
+
+    public static boolean saveConfig(String name) {
+        String clean = cleanConfigName(name);
+        if (clean.isEmpty()) return false;
+        try {
+            Path dir = configsDir();
+            Files.createDirectories(dir);
+            JsonObject root = new JsonObject();
+            for (Module m : MODULES) {
+                JsonObject o = new JsonObject();
+                o.addProperty("enabled", m.isEnabledRaw());
+                o.addProperty("bind", m.getBind() == null ? "" : m.getBind().getTranslationKey());
+                o.addProperty("bindMode", m.getBindMode().name());
+                JsonObject settings = new JsonObject();
+                for (Setting st : m.settings) {
+                    if (st instanceof ActionSetting) continue;
+                    settings.add(st.name, st.toJson());
+                }
+                o.add("settings", settings);
+                root.add(m.name, o);
+            }
+            Files.writeString(dir.resolve(clean + ".json"), GSON.toJson(root));
+            return true;
+        } catch (Exception e) {
+            OrangeClient.LOGGER.error("Nie udalo sie zapisac configu " + clean, e);
+            return false;
+        }
+    }
+
+    public static boolean loadConfig(String name) {
+        String clean = cleanConfigName(name);
+        if (clean.isEmpty()) return false;
+        Path path = configsDir().resolve(clean + ".json").normalize();
+        if (!path.getParent().equals(configsDir().normalize()) || !Files.isRegularFile(path)) return false;
+        loading = true;
+        try {
+            JsonObject root = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
+            if (root.has("NoEntityInteraction") && !root.has("AntiTrap")) {
+                root.add("AntiTrap", root.remove("NoEntityInteraction"));
+            }
+            for (Module m : MODULES) {
+                if (!root.has(m.name)) continue;
+                JsonObject o = root.getAsJsonObject(m.name);
+                if (o.has("settings") && o.get("settings").isJsonObject()) {
+                    JsonObject settings = o.getAsJsonObject("settings");
+                    for (Setting st : m.settings) {
+                        JsonElement value = settings.get(st.name);
+                        if (value != null) {
+                            try { st.fromJson(value); } catch (Exception ignored) { }
+                        }
+                    }
+                }
+                if (o.has("bind")) {
+                    String bind = o.get("bind").getAsString();
+                    try { m.setBind(bind.isEmpty() ? null : InputUtil.fromTranslationKey(bind)); } catch (Exception ignored) { }
+                }
+                if (o.has("bindMode")) {
+                    try { m.setBindMode(BindMode.valueOf(o.get("bindMode").getAsString())); } catch (Exception ignored) { }
+                }
+                if (o.has("enabled")) m.setEnabled(o.get("enabled").getAsBoolean());
+            }
+            return true;
+        } catch (Exception e) {
+            OrangeClient.LOGGER.error("Nie udalo sie wczytac configu " + clean, e);
+            return false;
+        } finally {
+            loading = false;
+            save();
+        }
+    }
+
+    public static boolean deleteConfig(String name) {
+        String clean = cleanConfigName(name);
+        if (clean.isEmpty()) return false;
+        try {
+            return Files.deleteIfExists(configsDir().resolve(clean + ".json").normalize());
+        } catch (Exception e) {
+            OrangeClient.LOGGER.error("Nie udalo sie usunac configu " + clean, e);
+            return false;
         }
     }
 

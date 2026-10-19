@@ -10,6 +10,8 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.BlockView;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -32,11 +34,32 @@ public abstract class CameraMixin {
     @Inject(method = "update", at = @At("RETURN"), require = 0)
     private void orange$freecamUpdate(BlockView area, Entity focusedEntity, boolean thirdPerson,
                                       boolean inverseView, float tickDelta, CallbackInfo ci) {
-        if (FreeLook.isActive()) { setRotation(FreeLook.cameraYaw(), FreeLook.cameraPitch()); return; }
         if (!Freecam.isActive()) return;
         Vec3d p = Freecam.cameraPos(tickDelta);
         setPos(p.x, p.y, p.z);
         setRotation(Freecam.cameraYaw(), Freecam.cameraPitch());
+    }
+
+    @Unique private boolean orange$inverseView;
+
+    @Inject(method = "update", at = @At("HEAD"), require = 0)
+    private void orange$rememberView(BlockView area, Entity focusedEntity, boolean thirdPerson,
+                                     boolean inverseView, float tickDelta, CallbackInfo ci) {
+        orange$inverseView = inverseView;
+    }
+
+    /**
+     * FreeLook: podmieniamy rotacje juz w setRotation (wywolywanym w Camera.update PRZED odsunieciem kamery
+     * w trzeciej osobie), dzieki czemu pozycja kamery w 3rd person podaza za FreeLook, a nie za graczem.
+     */
+    @ModifyVariable(method = "setRotation", at = @At("HEAD"), argsOnly = true, index = 1, require = 0)
+    private float orange$freeLookYaw(float yaw) {
+        return FreeLook.isActive() ? FreeLook.cameraYaw() + (orange$inverseView ? 180f : 0f) : yaw;
+    }
+
+    @ModifyVariable(method = "setRotation", at = @At("HEAD"), argsOnly = true, index = 2, require = 0)
+    private float orange$freeLookPitch(float pitch) {
+        return FreeLook.isActive() ? (orange$inverseView ? -FreeLook.cameraPitch() : FreeLook.cameraPitch()) : pitch;
     }
 
     /** Freecam: kamera "w trzeciej osobie", dzieki temu widac model gracza, a reka nie jest rysowana. */
