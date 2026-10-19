@@ -9,7 +9,6 @@ import com.example.orangeclient.setting.NumberSetting;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Items;
@@ -19,13 +18,23 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
-/** Places a lever into a nearby water source around another player's position. */
-public final class FastLever extends Module {
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+
+/**
+ * Wklada dzwignie w zrodla wody wokol gracza. Dzwignia nie da sie "waterlogowac",
+ * wiec zrodlo wody ginie - dobra kontra na wode / AutoWeb.
+ * Wklada wszystkie znalezione zrodla w jednym cyklu i probuje kolejnych scian podpory.
+ */
+public class FastLever extends Module {
     private final NumberSetting range = add(new NumberSetting("Range", 4.5, 1.0, 6.0, 0.1));
-    private final NumberSetting delay = add(new NumberSetting("Delay", 2, 0, 20, 1));
-    private final BoolSetting throughWalls = add(new BoolSetting("ThroughWalls", false));
+    private final NumberSetting radius = add(new NumberSetting("Radius", 1, 0, 2, 1));
+    private final NumberSetting delay = add(new NumberSetting("Delay", 0, 0, 20, 1));
     private final BoolSetting ignoreFriends = add(new BoolSetting("IgnoreFriends", true));
+    private final BoolSetting throughWalls = add(new BoolSetting("ThroughWalls", false));
     private final BoolSetting switchBack = add(new BoolSetting("SwitchBack", true));
+
     private int cooldown;
 
     public FastLever() { super("FastLever", Category.COMBAT); }
@@ -40,29 +49,33 @@ public final class FastLever extends Module {
         if (mc.currentScreen != null || Freecam.isActive() || mc.player.isSpectator()
                 || !mc.player.isAlive() || mc.player.isUsingItem()) return;
 
-        ClientPlayerEntity self = mc.player;
+        PlayerEntity self = mc.player;
         PlayerEntity target = findTarget(mc, self);
         if (target == null) return;
 
         PlayerInventory inv = self.getInventory();
-        // Prefer a lever in the offhand; do not change the selected hotbar slot in that case.
-        boolean offhandLever = self.getOffHandStack().isOf(Items.LEVER);
-        int leverSlot = offhandLever ? -1 : findLeverSlot(inv);
-        if (!offhandLever && leverSlot < 0) return;
+        boolean offhand = self.getOffHandStack().isOf(Items.LEVER);
+        int leverSlot = offhand ? -1 : findLeverSlot(inv);
+        if (!offhand && leverSlot < 0) return;
 
-        BlockPos waterPos = findNearbyWater(mc, target.getBlockPos(), self);
-        if (waterPos == null) return;
-        BlockHitResult hit = findSupportHit(mc, self, waterPos);
-        if (hit == null) return;
         double reach = self.getBlockInteractionRange() + 0.3;
-        if (self.getEyePos().squaredDistanceTo(hit.getPos()) > reach * reach) return;
+        double reachSq = reach * reach;
+
+        List<BlockPos> waters = findWater(mc, self, target.getBlockPos());
+        if (waters.isEmpty()) return;
 
         int oldSlot = inv.selectedSlot;
-        if (!offhandLever) inv.selectedSlot = leverSlot;
+        if (!offhand) inv.selectedSlot = leverSlot;
         try {
-            mc.interactionManager.interactBlock(self, offhandLever ? Hand.OFF_HAND : Hand.MAIN_HAND, hit);
+            Hand hand = offhand ? Hand.OFF_HAND : Hand.MAIN_HAND;
+            for (BlockPos water : waters) {
+                for (BlockHitResult hit : findSupportHits(mc, self, water)) {
+                    if (self.getEyePos().squaredDistanceTo(hit.getPos()) > reachSq) continue;
+                    if (mc.interactionManager.interactBlock(self, hand, hit).isAccepted()) break;
+                }
+            }
         } finally {
-            if (!offhandLever && switchBack.get()) inv.selectedSlot = oldSlot;
+            if (!offhand && switchBack.get()) inv.selectedSlot = oldSlot;
         }
         cooldown = (int) delay.get();
     }
@@ -71,11 +84,13 @@ public final class FastLever extends Module {
         PlayerEntity best = null;
         double bestDistance = Math.min(range.get(), self.getBlockInteractionRange() + 0.3);
         for (PlayerEntity candidate : mc.world.getPlayers()) {
-            if (candidate.getUuid().equals(self.getUuid()) || !candidate.isAlive() || candidate.isSpectator()) continue;
+            if (candidate == self || !candidate.isAlive() || candidate.isSpectator()) continue;
             if (ignoreFriends.get() && Friends.isFriend(candidate)) continue;
             if (!throughWalls.get() && !self.canSee(candidate)) continue;
             double distance = self.distanceTo(candidate);
-            if (distance <= bestDistance) { bestDistance = distance; best = candidate; }
+            if (distance > bestDistance) continue;
+            bestDistance = distance;
+            best = candidate;
         }
         return best;
     }
@@ -85,45 +100,51 @@ public final class FastLever extends Module {
         return -1;
     }
 
-    /** Finds a source-water block within a small area around the target's feet/head. */
-    private BlockPos findNearbyWater(MinecraftClient mc, BlockPos center, PlayerEntity self) {
-        BlockPos best = null;
-        double bestDistance = Double.MAX_VALUE;
-        for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) for (int dz = -1; dz <= 1; dz++) {
-            BlockPos pos = center.add(dx, dy, dz);
-            if (!mc.world.getBlockState(pos).isOf(Blocks.WATER)) continue;
-            if (!mc.world.getBlockState(pos).getFluidState().isStill()) continue;
-            if (!mc.world.getBlockState(pos).isReplaceable()) continue;
-            BlockHitResult support = findSupportHit(mc, self, pos);
-            if (support == null) continue;
-            double d = self.getEyePos().squaredDistanceTo(support.getPos());
-            double reach = self.getBlockInteractionRange() + 0.3;
-            if (d > reach * reach || d >= bestDistance) continue;
-            bestDistance = d;
-            best = pos.toImmutable();
+    /** Zrodla wody wokol gracza, od najblizszego, tylko takie do ktorych da sie przyczepic dzwignie. */
+    private List<BlockPos> findWater(MinecraftClient mc, PlayerEntity self, BlockPos center) {
+        int r = (int) radius.get();
+        List<BlockPos> out = new ArrayList<>();
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dz = -r; dz <= r; dz++) {
+                for (int dy = -1; dy <= r + 1; dy++) {
+                    BlockPos pos = center.add(dx, dy, dz);
+                    if (!isWaterSource(mc, pos)) continue;
+                    if (findSupportHits(mc, self, pos).isEmpty()) continue;
+                    out.add(pos.toImmutable());
+                }
+            }
         }
-        return best;
+        Vec3d eye = self.getEyePos();
+        out.sort(Comparator.comparingDouble((BlockPos p) -> eye.squaredDistanceTo(Vec3d.ofCenter(p))));
+        return out;
     }
 
-    /** Mirrors AutoWeb's through-wall placement strategy: synthesize a hit on a valid adjacent support block. */
-    private BlockHitResult findSupportHit(MinecraftClient mc, PlayerEntity player, BlockPos placePos) {
-        BlockHitResult best = null;
-        double bestDistance = Double.MAX_VALUE;
+    private boolean isWaterSource(MinecraftClient mc, BlockPos pos) {
+        BlockState state = mc.world.getBlockState(pos);
+        return state.isOf(Blocks.WATER) && state.getFluidState().isStill() && state.isReplaceable();
+    }
+
+    /** Wszystkie mozliwe sciany podpory; najpierw pelne boki (dzwignia wymaga pelnego boku). */
+    private List<BlockHitResult> findSupportHits(MinecraftClient mc, PlayerEntity player, BlockPos placePos) {
+        List<BlockHitResult> full = new ArrayList<>();
+        List<BlockHitResult> rest = new ArrayList<>();
         Vec3d eye = player.getEyePos();
         for (Direction face : Direction.values()) {
             BlockPos supportPos = placePos.offset(face.getOpposite());
             BlockState support = mc.world.getBlockState(supportPos);
             if (support.isReplaceable() || support.getCollisionShape(mc.world, supportPos).isEmpty()) continue;
+
             Vec3d hitPos = new Vec3d(
                     supportPos.getX() + 0.5 + face.getOffsetX() * 0.5,
                     supportPos.getY() + 0.5 + face.getOffsetY() * 0.5,
                     supportPos.getZ() + 0.5 + face.getOffsetZ() * 0.5);
-            double distance = eye.squaredDistanceTo(hitPos);
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                best = new BlockHitResult(hitPos, face, supportPos, false);
-            }
+            BlockHitResult hit = new BlockHitResult(hitPos, face, supportPos, false);
+            if (support.isSideSolidFullSquare(mc.world, supportPos, face)) full.add(hit);
+            else rest.add(hit);
         }
-        return best;
+        full.sort(Comparator.comparingDouble((BlockHitResult h) -> eye.squaredDistanceTo(h.getPos())));
+        rest.sort(Comparator.comparingDouble((BlockHitResult h) -> eye.squaredDistanceTo(h.getPos())));
+        full.addAll(rest);
+        return full;
     }
 }
