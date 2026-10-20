@@ -204,6 +204,12 @@ class Loader(ctk.CTk if ctk else object):
         self.geometry("880x600")
         self.minsize(820, 560)
         self.configure(fg_color=BG)
+        icon_path = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "orange.ico"
+        try:
+            if icon_path.is_file():
+                self.iconbitmap(str(icon_path))
+        except (OSError, tk.TclError):
+            pass
 
         self.settings = load_settings()
         s = self.settings
