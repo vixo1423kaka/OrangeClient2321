@@ -15,7 +15,7 @@ public final class Flight extends Module {
     private final NumberSetting glide = add(new NumberSetting("Glide", 0.04, 0.0, 0.15, 0.01));
     public Flight() { super("Flight", Category.MOVEMENT); }
     @Override public void onTick(MinecraftClient mc) {
-        if (mc.player == null || mc.world == null || mc.currentScreen != null) return;
+        if (mc.player == null || mc.world == null) return;
         var p = mc.player;
         double forward = (mc.options.forwardKey.isPressed() ? 1 : 0) - (mc.options.backKey.isPressed() ? 1 : 0);
         double side = (mc.options.leftKey.isPressed() ? 1 : 0) - (mc.options.rightKey.isPressed() ? 1 : 0);
