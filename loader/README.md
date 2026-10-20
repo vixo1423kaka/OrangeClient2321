@@ -1,24 +1,26 @@
 # Orange Client Loader — Windows
 
 ## Build
-Najnowszy EXE: GitHub Actions → `build-loader.yml` → artefakt `OrangeClientLoader-Windows`.
+Po zbudowaniu workflow artefakt znajduje się w GitHub Actions jako `OrangeClientLoader-Windows`.
 
 ## Funkcje
-- Klucz licencji zapamiętywany w `%APPDATA%/OrangeClientLoader/settings.json` (zapis przy każdej zmianie).
-- Wykrywa konta z oficjalnego launchera, Modrinth App, Prism i MultiMC (tylko nick/UUID/e-mail, nigdy tokeny) i pokazuje je na liście kont. Wiele kont do wyboru.
-- Logowanie Microsoft zapamiętywane między uruchomieniami (token odświeżania chroniony DPAPI). Tryb Offline jako alternatywa.
-- Brak migających okien cmd (Java i instalator Fabric działają bez konsoli).
-- Osobny profil gry: `%APPDATA%/OrangeClientLoader/instances/<wersja>`.
-- Na liście są tylko wersje obsługiwane przez mod (obecnie 1.21.4).
+- Osobna instancja gry dla każdej wersji: `%APPDATA%/OrangeClientLoader/instances/<wersja>`.
+- Wybór Minecraft Java 1.21.4–1.21.11; instalator konfiguruje Fabric i pobiera pasujące Fabric API.
+- Zakładka **Mody**: wyszukiwanie modów na Modrinth, instalowanie wydania zgodnego z wybraną wersją Minecraft i Fabric oraz usuwanie dodatkowych plików JAR.
+- Konto Microsoft (OAuth w przeglądarce) lub tryb offline z nazwą gracza.
+- Zapamiętane sesje Microsoft chronione przez Windows DPAPI.
+- Klucz licencji zapamiętywany w `%APPDATA%/OrangeClientLoader/settings.json`.
+- Wykrywanie profili/kont w oficjalnym launcherze, Modrinth App, Prism i MultiMC (tylko podstawowe dane profilu; tokeny z innych launcherów nie są odczytywane).
+
+## Ważne: zgodność Orange Client
+Aktualny plik źródłowy moda jest skonfigurowany dla Minecraft **1.21.4** (`gradle.properties` i `fabric.mod.json`). Loader pozwala przygotować instancje Fabric dla 1.21.4–1.21.11 i zarządzać dodatkowymi modami, ale Orange Client jest automatycznie kopiowany tylko do instancji 1.21.4. Pozostałe wersje wymagają osobnego portowania i testowania kodu moda (zwłaszcza mixinów) przed dołączeniem ich JAR-ów do EXE. Nie należy deklarować ich jako wspieranych przez Orange Client, dopóki build i test uruchomienia nie przejdą.
 
 ## Logowanie Microsoft — jednorazowa konfiguracja
-Loader loguje przez własną aplikację Azure (nie czyta tokenów z innych launcherów).
-1. https://portal.azure.com → Microsoft Entra ID → App registrations → New registration.
-2. Supported account types: **Personal Microsoft accounts only**.
-3. Redirect URI: platforma **Mobile and desktop applications**, wartość `http://localhost`.
-4. Skopiuj *Application (client) ID* i ustaw go raz jako zmienną repozytorium `AZURE_CLIENT_ID`
-   (GitHub → Settings → Secrets and variables → Actions → Variables). Build wbudowuje go w EXE,
-   więc użytkownik niczego nie wpisuje, a pole w Ustawieniach się nie pokazuje.
-   Przy lokalnym buildzie (`build.bat`) utwórz `loader/_build_config.py` z linią
-   `AZURE_CLIENT_ID = "twoje-id"`. Bez wbudowanego ID loader pokaże pole w Ustawieniach.
-5. Nowe aplikacje wymagają zgody Mojang na Minecraft API: https://aka.ms/AppRegInfo
+Loader używa własnej aplikacji OAuth i nie pobiera tokenów z innych launcherów.
+1. Otwórz https://portal.azure.com → Microsoft Entra ID → App registrations → New registration.
+2. Wybierz **Personal Microsoft accounts only**.
+3. Dodaj Redirect URI dla **Mobile and desktop applications**: `http://localhost`.
+4. Skopiuj *Application (client) ID* i ustaw zmienną repozytorium `AZURE_CLIENT_ID` w GitHub → Settings → Secrets and variables → Actions → Variables. Workflow osadza ID w EXE.
+5. Sprawdź wymagania Mojang dla Minecraft API: https://aka.ms/AppRegInfo
+
+Tryb offline nie jest kontem premium i nie zapewnia uwierzytelniania na serwerach wymagających prawdziwego konta Microsoft/Minecraft.
