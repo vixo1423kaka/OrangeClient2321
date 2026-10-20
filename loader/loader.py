@@ -283,6 +283,16 @@ class Loader(ctk.CTk if ctk else object):
         title = ctk.CTkLabel(titlebar, text="ORANGE CLIENT", text_color="#c5cad4",
                              font=("Segoe UI", 12, "bold"))
         title.pack(side="left", padx=14)
+        lights = ctk.CTkFrame(titlebar, fg_color="transparent")
+        lights.pack(side="right", padx=(10, 14), pady=10)
+        for color, hover, command in (
+            ("#ff5f57", "#ff817b", self._window_close),
+            ("#febc2e", "#ffd166", self._window_minimize),
+            ("#28c840", "#55df68", self._window_toggle_maximize),
+        ):
+            ctk.CTkButton(lights, text="", width=13, height=13, corner_radius=8,
+                          fg_color=color, hover_color=hover, border_width=0,
+                          command=command).pack(side="left", padx=(0, 7))
 
         content = ctk.CTkFrame(self.shell, fg_color="transparent", corner_radius=20)
         content.pack(side="top", fill="both", expand=True, padx=2, pady=(2, 2))
