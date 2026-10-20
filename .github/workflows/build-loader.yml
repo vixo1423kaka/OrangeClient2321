@@ -1,0 +1,34 @@
+name: Build Windows Loader
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [loader-prototype]
+    paths:
+      - "loader/**"
+      - ".github/workflows/build-loader.yml"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        working-directory: loader
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Build EXE
+        working-directory: loader
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name OrangeClientLoader loader.py
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrangeClientLoader-Windows
+          path: loader/dist/OrangeClientLoader.exe
+          if-no-files-found: error
