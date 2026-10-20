@@ -245,6 +245,7 @@ class Loader(ctk.CTk if ctk else object):
         self._build_ui()
         self._show_play()
         self._refresh_account_label()
+        self._fade_in()
         if self.accounts:
             threading.Thread(target=self._silent_refresh, daemon=True).start()
 
@@ -289,7 +290,7 @@ class Loader(ctk.CTk if ctk else object):
         titlebar.pack(fill="x", padx=2, pady=(2, 0))
         titlebar.pack_propagate(False)
         lights = ctk.CTkFrame(titlebar, fg_color="transparent")
-        lights.pack(side="left", padx=(14, 10), pady=10)
+        lights.pack(side="right", padx=(10, 14), pady=10)
         for color, hover, command in (
             ("#ff5f57", "#ff817b", self._window_close),
             ("#febc2e", "#ffd166", self._window_minimize),
@@ -336,6 +337,17 @@ class Loader(ctk.CTk if ctk else object):
         self.status = ctk.CTkLabel(inner, text="Gotowy.", font=("Segoe UI", 12), text_color=MUTED,
                                    anchor="w", justify="left", wraplength=420)
         self.status.pack(side="left", fill="x", expand=True)
+
+    def _fade_in(self, step=0):
+        """Subtle startup fade; ignored on platforms without window alpha."""
+        if not self.winfo_exists():
+            return
+        try:
+            self.attributes("-alpha", min(1.0, 0.18 + step * 0.10))
+        except tk.TclError:
+            return
+        if step < 8:
+            self.after(18, lambda: self._fade_in(step + 1))
 
     def _drag_start(self, event):
         if self._maximized:
