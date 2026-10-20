@@ -37,7 +37,14 @@ public class OrangeClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             LicenseManager.refreshIfDue();
-            if (client.player != null && client.world != null) LicenseManager.requireLicense(client);
+            if (client.player != null && client.world != null) {
+                LicenseManager.requireLicense(client);
+                // Loader zapisuje klucz przed startem. Jeśli weryfikacja się zakończyła
+                // i licencja jest nieważna, zamknij klienta zamiast pozostawiać ekran gry.
+                if (!LicenseManager.isChecking() && !LicenseManager.isValid()) {
+                    client.scheduleStop();
+                }
+            }
             if (GuiModule.consumeOpen() && client.currentScreen == null && LicenseManager.isValid()) client.setScreen(new ClickGui());
             ModuleManager.onTick(client);
         });
