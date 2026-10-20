@@ -76,11 +76,6 @@ public final class OrangeMainMenu extends Screen {
         rounded(ctx, panelX, panelY, panelX + panelW, panelY + panelH, 24, PANEL);
 
 
-        // macOS-style traffic lights, drawn as actual circles rather than square buttons.
-        int lightY = panelY + 25;
-        drawDot(ctx, panelX + 25, lightY, 6, 0xFFFF6058, 0xFFB83A35);
-        drawDot(ctx, panelX + 45, lightY, 6, 0xFFFFBD2E, 0xFFB88719);
-        drawDot(ctx, panelX + 65, lightY, 6, 0xFF28C840, 0xFF16872B);
         UiFont.draw(ctx, textRenderer, "ORANGE CLIENT", panelX + 92, panelY + 21, 0xFFB8BEC9);
         UiFont.draw(ctx, textRenderer, "MINECRAFT  /  FABRIC", panelX + panelW - 172, panelY + 21, 0xFF737B89);
 
