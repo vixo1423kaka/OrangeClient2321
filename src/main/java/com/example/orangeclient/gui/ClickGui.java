@@ -319,10 +319,11 @@ public class ClickGui extends Screen {
 
         long licenseDays = LicenseManager.getDaysRemaining();
         String licenseLabel = licenseDays >= 0
-                ? "Licencja: " + licenseDays + (licenseDays == 1 ? " dzien" : " dni")
-                : (LicenseManager.isValid() ? "Licencja aktywna" : "Licencja: --");
+                ? "License expires in: " + licenseDays + (licenseDays == 1 ? " day" : " days")
+                : (LicenseManager.isValid() ? "License expires in: Lifetime" : "License expires in: --");
         int licenseColor = licenseDays == 0 ? 0xFFFF6666 : 0xFFE0E5EC;
-        UiFont.draw(ctx, textRenderer, fnt(licenseLabel), px + pw - 142, py + 10, licenseColor);
+        // Render the license status below the header so it never overlaps the search bar.
+        UiFont.draw(ctx, textRenderer, fnt(licenseLabel), px + pw - 185, py + HEADER_H + 4, licenseColor);
 
         // --- zakladki na dole (podswietlenie plynnie przesuwa sie miedzy nimi)
         Tab[] tabs = {Tab.MODULES, Tab.CONFIGS, Tab.FRIENDS};   // Waypoints otwiera sie PPM na module Waypoint Manager
@@ -389,7 +390,7 @@ public class ClickGui extends Screen {
         int categorySlide = categoryAnimStart == 0L ? 0 : Math.round(categorySlideDir * (1f - categoryEase) * 18f);
 
         int cx1 = px + 48;
-        int cy1 = py + HEADER_H + 8;
+        int cy1 = py + HEADER_H + 20;
         int availW = pw - 64;
         viewX1 = px + 6;
         viewY1 = cy1 - 4;
