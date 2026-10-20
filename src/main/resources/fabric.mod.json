@@ -3,6 +3,7 @@
   "id": "orangeclient",
   "version": "0.1.0",
   "name": "Orange Client",
+  "icon": "assets/orangeclient/textures/gui/orange_small.png",
   "description": "Modularny klient: Render + Player.",
   "authors": [
     "YourName"
