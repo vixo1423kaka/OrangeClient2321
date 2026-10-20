@@ -6,6 +6,7 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.multiplayer.MultiplayerScreen;
 import net.minecraft.client.gui.screen.option.OptionsScreen;
 import net.minecraft.client.gui.screen.world.SelectWorldScreen;
+import com.example.orangeclient.util.UiFont;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
@@ -24,12 +25,12 @@ public final class OrangeMainMenu extends Screen {
     private static final int TEX_SIZE = 512;
     private static final int GLOW_SIZE = 512;
     private static final float ORANGE_SHARE = 0.46f;
-    private static final String[] LABELS = {"JEDNOOSOBOWA", "WIELOOSOBOWA", "USTAWIENIA", "WYJDŹ"};
+    private static final String[] LABELS = {"SINGLEPLAYER", "MULTIPLAYER", "SETTINGS", "QUIT"};
     private static final String[] HINTS = {
-            "Stwórz świat lub kontynuuj przygodę",
-            "Dołącz do serwera ze znajomymi",
-            "Grafika, sterowanie i dźwięk",
-            "Zamknij Orange Client"
+            "Create a world or continue your adventure",
+            "Join a server and play with friends",
+            "Graphics, controls and sound",
+            "Close Orange Client"
     };
     private final float[] hover = new float[LABELS.length];
     private int panelX, panelY, panelW, panelH;
@@ -73,16 +74,15 @@ public final class OrangeMainMenu extends Screen {
         // Main floating glass panel: rounded corners, shadow and a thin outline.
         rounded(ctx, panelX + 5, panelY + 8, panelX + panelW + 5, panelY + panelH + 8, 24, 0x50000000);
         rounded(ctx, panelX, panelY, panelX + panelW, panelY + panelH, 24, PANEL);
-        roundedOutline(ctx, panelX, panelY, panelX + panelW, panelY + panelH, 24, BORDER);
-        ctx.fill(panelX + 1, panelY + 63, panelX + panelW - 1, panelY + 64, 0x30FFFFFF);
+
 
         // macOS-style traffic lights, drawn as actual circles rather than square buttons.
         int lightY = panelY + 25;
         drawDot(ctx, panelX + 25, lightY, 6, 0xFFFF6058, 0xFFB83A35);
         drawDot(ctx, panelX + 45, lightY, 6, 0xFFFFBD2E, 0xFFB88719);
         drawDot(ctx, panelX + 65, lightY, 6, 0xFF28C840, 0xFF16872B);
-        ctx.drawText(textRenderer, Text.literal("ORANGE CLIENT"), panelX + 92, panelY + 21, 0xFFB8BEC9, false);
-        ctx.drawText(textRenderer, Text.literal("MINECRAFT  /  FABRIC"), panelX + panelW - 172, panelY + 21, 0xFF737B89, false);
+        UiFont.draw(ctx, textRenderer, "ORANGE CLIENT", panelX + 92, panelY + 21, 0xFFB8BEC9);
+        UiFont.draw(ctx, textRenderer, "MINECRAFT  /  FABRIC", panelX + panelW - 172, panelY + 21, 0xFF737B89);
 
         // Rotating orange hero on the right, contained inside the rounded app panel.
         float heroX = panelX + panelW * 0.755f;
@@ -92,9 +92,9 @@ public final class OrangeMainMenu extends Screen {
 
         int titleX = buttonX + 2;
         ctx.fill(titleX, panelY + 91, titleX + 4, panelY + 132, ORANGE);
-        ctx.drawTextWithShadow(textRenderer, Text.literal("ORANGE"), titleX + 15, panelY + 91, 0xFFFFFFFF);
-        ctx.drawTextWithShadow(textRenderer, Text.literal("CLIENT"), titleX + 15, panelY + 109, ORANGE);
-        ctx.drawText(textRenderer, Text.literal("TWOJA GRA. TWOJE ZASADY."), titleX, panelY + 139, 0xFF969EAC, false);
+        UiFont.draw(ctx, textRenderer, "ORANGE", titleX + 15, panelY + 91, 0xFFFFFFFF);
+        UiFont.draw(ctx, textRenderer, "CLIENT", titleX + 15, panelY + 109, ORANGE);
+        UiFont.draw(ctx, textRenderer, "YOUR GAME. YOUR RULES.", titleX, panelY + 139, 0xFF969EAC);
 
         for (int i = 0; i < LABELS.length; i++) {
             int y = buttonY + i * (buttonH + buttonGap);
@@ -104,19 +104,19 @@ public final class OrangeMainMenu extends Screen {
             drawButton(ctx, i, y, hover[i]);
         }
 
-        ctx.drawText(textRenderer, Text.literal("PLAY DIFFERENT."), panelX + 38, panelY + panelH - 28, 0xFF737B89, false);
-        ctx.drawText(textRenderer, Text.literal("v0.1.0  •  1.21.4"), panelX + panelW - 122, panelY + panelH - 28, 0xFF626A78, false);
+        UiFont.draw(ctx, textRenderer, "PLAY DIFFERENT.", panelX + 38, panelY + panelH - 28, 0xFF737B89);
+        UiFont.draw(ctx, textRenderer, "v0.1.0  •  1.21.4", panelX + panelW - 122, panelY + panelH - 28, 0xFF626A78);
     }
 
     private void drawButton(DrawContext ctx, int i, int y, float amount) {
         int fill = mix(0xE51D212A, 0xF53A2115, amount);
         int edge = mix(0xFF343945, ORANGE, amount);
         rounded(ctx, buttonX, y, buttonX + buttonW, y + buttonH, 12, fill);
-        roundedOutline(ctx, buttonX, y, buttonX + buttonW, y + buttonH, 12, edge);
+
         rounded(ctx, buttonX + 1, y + 1, buttonX + 5, y + buttonH - 1, 2, mix(0xFF4A505D, ORANGE, amount));
         int tx = buttonX + 17;
-        ctx.drawText(textRenderer, Text.literal(LABELS[i]), tx, y + 9, mix(0xFFE2E6ED, 0xFFFFFFFF, amount), false);
-        ctx.drawText(textRenderer, Text.literal(HINTS[i]), tx, y + 27, mix(0xFF858E9D, 0xFFFFB16F, amount), false);
+        UiFont.draw(ctx, textRenderer, LABELS[i], tx, y + 9, mix(0xFFE2E6ED, 0xFFFFFFFF, amount));
+        UiFont.draw(ctx, textRenderer, HINTS[i], tx, y + 27, mix(0xFF858E9D, 0xFFFFB16F, amount));
         if (amount > 0.02f) {
             int cx = buttonX + buttonW - 19;
             drawDot(ctx, cx, y + buttonH / 2, 3, (Math.round(amount * 255) << 24) | 0x00FF8617, 0x00000000);
