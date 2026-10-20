@@ -1,19 +1,20 @@
-# Orange Client Loader — Windows prototype
+# Orange Client Loader — Windows
 
 ## Build
-Download the latest successful artifact from GitHub Actions:
-https://github.com/vixo1423kaka/OrangeClient2321/actions/workflows/build-loader.yml
+Najnowszy EXE: GitHub Actions → `build-loader.yml` → artefakt `OrangeClientLoader-Windows`.
 
-The build workflow compiles Orange Client, bundles the mod jar into the EXE, and uploads `OrangeClientLoader-Windows`.
+## Funkcje
+- Klucz licencji zapamiętywany w `%APPDATA%/OrangeClientLoader/settings.json` (zapis przy każdej zmianie).
+- Logowanie Microsoft zapamiętywane między uruchomieniami (token odświeżania chroniony DPAPI). Tryb Offline jako alternatywa.
+- Brak migających okien cmd (Java i instalator Fabric działają bez konsoli).
+- Osobny profil gry: `%APPDATA%/OrangeClientLoader/instances/<wersja>`.
+- Na liście są tylko wersje obsługiwane przez mod (obecnie 1.21.4).
 
-## Features
-- Dark modern UI.
-- Automatically searches common install locations for Minecraft, Modrinth, Prism Launcher, MultiMC, ATLauncher and CurseForge.
-- Version list is loaded from Mojang's live version manifest and starts at Minecraft 1.21.4.
-- Uses a dedicated loader-managed game directory under `%APPDATA%/OrangeClientLoader/instances/<version>` so it does not overwrite another launcher's mods/configs.
-- For Minecraft 1.21.4, installs Minecraft + Fabric, places the bundled Orange Client jar and downloads Fabric API.
-- Offline mode supported.
-- Microsoft mode opens the official launcher if detected; it does not yet perform Microsoft OAuth in this app.
-
-## Compatibility warning
-The mod's current `fabric.mod.json` declares Minecraft 1.21.4. The loader lists newer releases, but the mod itself has not been ported to them; selecting a newer version will be rejected by the current launcher code rather than pretending the mod works. Microsoft account authentication is not implemented yet.
+## Logowanie Microsoft — jednorazowa konfiguracja
+Loader loguje przez własną aplikację Azure (nie czyta tokenów z innych launcherów).
+1. https://portal.azure.com → Microsoft Entra ID → App registrations → New registration.
+2. Supported account types: **Personal Microsoft accounts only**.
+3. Redirect URI: platforma **Mobile and desktop applications**, wartość `http://localhost`.
+4. Skopiuj *Application (client) ID* i wklej w loaderze: Ustawienia → Azure Client ID
+   (albo wpisz w `AZURE_CLIENT_ID` w `loader.py` przed buildem).
+5. Nowe aplikacje wymagają zgody Mojang na Minecraft API: https://aka.ms/AppRegInfo

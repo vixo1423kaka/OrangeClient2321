@@ -1,468 +1,500 @@
+import ctypes
+import http.server
 import json
 import os
 import re
-import subprocess
-import threading
-import urllib.request
-import urllib.parse
 import shutil
+import subprocess
 import sys
+import threading
 import tkinter as tk
-from tkinter import messagebox
+import urllib.parse
+import urllib.request
+import webbrowser
 from pathlib import Path
+from tkinter import messagebox
+
+# --- Ukrywanie okien cmd na Windows (Java, instalator Fabric itp.) -------------------------
+if os.name == "nt":
+    _orig_popen_init = subprocess.Popen.__init__
+
+    def _quiet_popen_init(self, *args, **kwargs):
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | 0x08000000  # CREATE_NO_WINDOW
+        si = kwargs.get("startupinfo") or subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0
+        kwargs["startupinfo"] = si
+        _orig_popen_init(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = _quiet_popen_init
 
 try:
     import customtkinter as ctk
-    import minecraft_launcher_lib
+    import minecraft_launcher_lib as mll
 except ImportError:
     ctk = None
-    minecraft_launcher_lib = None
+    mll = None
 
-APP_NAME = "ORANGE CLIENT"
 APPDATA = Path(os.environ.get("APPDATA", str(Path.home())))
-DEFAULT_DIR = APPDATA / ".minecraft"
-BG = "#090b10"
-PANEL = "#111620"
-CARD = "#171e2b"
-MUTED = "#8792a8"
-TEXT = "#f4f6fb"
-ACCENTS = ["#ff7a18", "#ff8b2b", "#ff9c42", "#ff8b2b"]
+DATA_DIR = APPDATA / "OrangeClientLoader"
+SETTINGS_FILE = DATA_DIR / "settings.json"
+INSTANCES = DATA_DIR / "instances"
+MOD_JAR = "orange-client-0.1.0.jar"
+SUPPORTED_VERSIONS = ["1.21.4"]   # wersje, dla których zbudowany jest mod
+# Client ID własnej aplikacji Azure (patrz README). Można nadpisać zmienną środowiskową
+# ORANGE_AZURE_CLIENT_ID lub polem w Ustawieniach.
+AZURE_CLIENT_ID = ""
+REDIRECT_PORT = 28487
+REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}"
+
+BG, SIDE, PANEL, BORDER = "#0b0d12", "#10141c", "#151b26", "#242c3b"
+TEXT, MUTED, ORANGE, ORANGE_H = "#f2f4f8", "#8691a6", "#f47c20", "#ff963f"
+GREEN, RED = "#69d69a", "#ff6b6b"
 
 
-def discover_game_dirs():
-    candidates = [
-        ("Minecraft", APPDATA / ".minecraft"),
-        ("Modrinth", APPDATA / "com.modrinth.theseus"),
-        ("Modrinth", APPDATA / "ModrinthApp"),
-        ("Prism", APPDATA / "PrismLauncher" / "instances"),
-        ("MultiMC", APPDATA / "MultiMC" / "instances"),
-        ("ATLauncher", APPDATA / "ATLauncher" / "Instances"),
-        ("CurseForge", Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "CurseForge" / "Minecraft" / "Instances"),
-    ]
-    found, seen = [], set()
-
-    def add(label, path):
-        try:
-            path = path.resolve()
-            if path.is_dir() and str(path).lower() not in seen:
-                found.append((label, path))
-                seen.add(str(path).lower())
-        except OSError:
-            pass
-
-    for label, root in candidates:
-        if not root.exists():
-            continue
-        if (root / "versions").is_dir():
-            add(label, root)
-        try:
-            for child in root.iterdir():
-                if not child.is_dir():
-                    continue
-                for candidate in (child, child / ".minecraft", child / "minecraft", child / "game"):
-                    if (candidate / "versions").is_dir():
-                        add(f"{label} · {child.name}", candidate)
-                try:
-                    for sub in child.iterdir():
-                        if sub.is_dir():
-                            for candidate in (sub, sub / ".minecraft", sub / "minecraft"):
-                                if (candidate / "versions").is_dir():
-                                    add(f"{label} · {child.name}/{sub.name}", candidate)
-                except OSError:
-                    pass
-        except OSError:
-            pass
-    if not found:
-        add("Minecraft", DEFAULT_DIR)
-    return found
+# --- Ochrona sekretów (DPAPI na Windows, w innym wypadku zwykły tekst) ----------------------
+class _Blob(ctypes.Structure):
+    _fields_ = [("cbData", ctypes.c_uint32), ("pbData", ctypes.POINTER(ctypes.c_char))]
 
 
-def available_versions():
+def _dpapi(data: bytes, protect: bool) -> bytes:
+    inp = _Blob(len(data), ctypes.cast(ctypes.create_string_buffer(data, len(data)), ctypes.POINTER(ctypes.c_char)))
+    out = _Blob()
+    fn = ctypes.windll.crypt32.CryptProtectData if protect else ctypes.windll.crypt32.CryptUnprotectData
+    if not fn(ctypes.byref(inp), None, None, None, None, 0, ctypes.byref(out)):
+        raise OSError("DPAPI")
     try:
-        req = urllib.request.Request(
-            "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
-            headers={"User-Agent": "OrangeClientLoader/1.0"})
-        with urllib.request.urlopen(req, timeout=12) as response:
-            manifest = json.loads(response.read().decode("utf-8"))
-        out = []
-        for item in manifest.get("versions", []):
-            vid = item.get("id", "")
-            if item.get("type") == "release" and re.match(r"^1\.\d+\.\d+$", vid):
-                nums = tuple(int(x) for x in re.findall(r"\d+", vid))
-                if nums >= (1, 21, 4):
-                    out.append(vid)
-        return out or ["1.21.4"]
-    except Exception:
-        return ["1.21.4"]
+        return ctypes.string_at(out.pbData, out.cbData)
+    finally:
+        ctypes.windll.kernel32.LocalFree(out.pbData)
+
+
+def seal(text: str) -> str:
+    if os.name == "nt" and text:
+        try:
+            return "dpapi:" + _dpapi(text.encode(), True).hex()
+        except OSError:
+            pass
+    return "plain:" + text
+
+
+def unseal(text: str) -> str:
+    try:
+        if text.startswith("dpapi:"):
+            return _dpapi(bytes.fromhex(text[6:]), False).decode()
+        if text.startswith("plain:"):
+            return text[6:]
+    except (OSError, ValueError):
+        pass
+    return ""
+
+
+def load_settings() -> dict:
+    try:
+        return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(data: dict) -> None:
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        SETTINGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+# --- Logowanie Microsoft (własne OAuth, PKCE, przekierowanie na localhost) ----------------
+def microsoft_login(client_id: str, timeout: int = 180) -> dict:
+    """Otwiera przeglądarkę, czeka na kod i zwraca dane konta (id, name, access_token, refresh_token)."""
+    url, state, verifier = mll.microsoft_account.get_secure_login_data(client_id, REDIRECT_URI)
+    result = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            result["url"] = f"{REDIRECT_URI}{self.path}"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write("<html><body style='font-family:Segoe UI;background:#0b0d12;color:#fff;"
+                             "text-align:center;padding-top:80px'><h2>Zalogowano w Orange Client</h2>"
+                             "<p>Możesz zamknąć tę kartę i wrócić do loadera.</p></body></html>".encode("utf-8"))
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", REDIRECT_PORT), Handler)
+    server.timeout = timeout
+    try:
+        webbrowser.open(url)
+        server.handle_request()
+    finally:
+        server.server_close()
+    if "url" not in result:
+        raise RuntimeError("Przekroczono czas logowania.")
+    code = mll.microsoft_account.parse_auth_code_url(result["url"], state)
+    return mll.microsoft_account.complete_login(client_id, None, REDIRECT_URI, code, verifier)
+
+
+def humanize_login_error(exc: Exception) -> str:
+    name = type(exc).__name__
+    if name == "AccountNotOwnMinecraft":
+        return "To konto Microsoft nie posiada Minecrafta Java Edition."
+    if name == "AzureAppNotPermitted":
+        return "Aplikacja Azure nie ma zgody na Minecraft API (patrz README, sekcja logowanie)."
+    return str(exc) or name
 
 
 class Loader(ctk.CTk if ctk else object):
     def __init__(self):
-        if ctk is None:
-            raise RuntimeError("Brak customtkinter")
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
         super().__init__()
         self.title("Orange Client")
-        self.geometry("1000x720")
-        self.minsize(850, 650)
+        self.geometry("880x600")
+        self.minsize(820, 560)
         self.configure(fg_color=BG)
-        self.game_dirs = discover_game_dirs()
-        self.current_dir = self.game_dirs[0][1] if self.game_dirs else DEFAULT_DIR
-        self.version_items = available_versions()
-        self.mode = ctk.StringVar(value="offline")
-        self.username = ctk.StringVar(value="Player")
-        self.license_key = ctk.StringVar()
-        self._anim_index = 0
+
+        self.settings = load_settings()
+        self.account = None  # {"id","name","refresh"}
+        s = self.settings
+        if s.get("account", {}).get("refresh"):
+            a = s["account"]
+            self.account = {"id": a.get("id", ""), "name": a.get("name", ""), "refresh": unseal(a["refresh"])}
+        self.mode = tk.StringVar(value=s.get("mode", "offline"))
+        self.username = tk.StringVar(value=s.get("username", "Player"))
+        self.license_key = tk.StringVar(value=s.get("license_key", "") or self._key_from_instances())
+        self.license_key.trace_add("write", lambda *_: self._persist())
+        self.username.trace_add("write", lambda *_: self._persist())
         self._busy = False
+
         self._build_ui()
-        self.refresh_versions()
-        self._animate_accent()
+        self._show_play()
+        self._refresh_account_label()
+        if self.account:
+            threading.Thread(target=self._silent_refresh, daemon=True).start()
 
+    # ---- stan -------------------------------------------------------------------------------
+    @staticmethod
+    def _key_from_instances():
+        for version in SUPPORTED_VERSIONS:
+            f = INSTANCES / version / "config" / "orangeclient_license.json"
+            try:
+                key = json.loads(f.read_text(encoding="utf-8")).get("key", "")
+                if key:
+                    return key
+            except (OSError, ValueError):
+                pass
+        return ""
+
+    def _client_id(self):
+        return (os.environ.get("ORANGE_AZURE_CLIENT_ID") or self.settings.get("azure_client_id")
+                or AZURE_CLIENT_ID).strip()
+
+    def _persist(self):
+        self.settings["license_key"] = self.license_key.get().strip()
+        self.settings["username"] = self.username.get().strip()
+        self.settings["mode"] = self.mode.get()
+        if self.account:
+            self.settings["account"] = {"id": self.account["id"], "name": self.account["name"],
+                                        "refresh": seal(self.account["refresh"])}
+        else:
+            self.settings.pop("account", None)
+        save_settings(self.settings)
+
+    def ui(self, fn):
+        self.after(0, fn)
+
+    # ---- UI ---------------------------------------------------------------------------------
     def _build_ui(self):
-        # Left navigation rail
-        self.sidebar = ctk.CTkFrame(self, width=205, corner_radius=0, fg_color="#0d1119")
-        self.sidebar.pack(side="left", fill="y")
-        self.sidebar.pack_propagate(False)
+        side = ctk.CTkFrame(self, width=170, corner_radius=0, fg_color=SIDE)
+        side.pack(side="left", fill="y")
+        side.pack_propagate(False)
+        ctk.CTkLabel(side, text="ORANGE", font=("Segoe UI", 20, "bold"), text_color=ORANGE).pack(anchor="w", padx=20, pady=(26, 0))
+        ctk.CTkLabel(side, text="CLIENT", font=("Segoe UI", 11, "bold"), text_color=MUTED).pack(anchor="w", padx=20, pady=(0, 28))
+        self.nav = {}
+        for key, label, cmd in (("play", "Graj", self._show_play), ("settings", "Ustawienia", self._show_settings)):
+            b = ctk.CTkButton(side, text=label, anchor="w", height=38, corner_radius=8,
+                              fg_color="transparent", hover_color="#1b2230", text_color=MUTED,
+                              font=("Segoe UI", 13), command=cmd)
+            b.pack(fill="x", padx=10, pady=2)
+            self.nav[key] = b
 
-        brand = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        brand.pack(fill="x", padx=21, pady=(27, 30))
-        ctk.CTkLabel(brand, text="◈", font=("Segoe UI Symbol", 28, "bold"),
-                     text_color="#ff8526").pack(side="left", padx=(0, 9))
-        brand_words = ctk.CTkFrame(brand, fg_color="transparent")
-        brand_words.pack(side="left")
-        ctk.CTkLabel(brand_words, text="ORANGE", font=("Segoe UI", 19, "bold"),
-                     text_color=TEXT).pack(anchor="w")
-        ctk.CTkLabel(brand_words, text="CLIENT  /  LOADER", font=("Segoe UI", 9, "bold"),
-                     text_color=MUTED).pack(anchor="w", pady=(0, 1))
+        main = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
+        main.pack(side="left", fill="both", expand=True)
+        self.page = ctk.CTkFrame(main, fg_color=BG, corner_radius=0)
+        self.page.pack(fill="both", expand=True, padx=28, pady=(24, 8))
 
-        ctk.CTkLabel(self.sidebar, text="MENU GŁÓWNE", font=("Segoe UI", 9, "bold"),
-                     text_color="#667187").pack(anchor="w", padx=22, pady=(0, 8))
-        self.nav_play = ctk.CTkButton(self.sidebar, text="   ▶    Graj", anchor="w",
-                                      height=42, corner_radius=9, fg_color="#24202a",
-                                      hover_color="#30232a", text_color="#ff9948",
-                                      font=("Segoe UI", 12, "bold"), command=self._show_play)
-        self.nav_play.pack(fill="x", padx=12, pady=3)
-        ctk.CTkButton(self.sidebar, text="   ◉    Instalacje", anchor="w", height=42,
-                      corner_radius=9, fg_color="transparent", hover_color="#1a202b",
-                      text_color="#a7b0c2", font=("Segoe UI", 12),
-                      command=self._show_installs).pack(fill="x", padx=12, pady=3)
-        ctk.CTkButton(self.sidebar, text="   ⚙    Ustawienia", anchor="w", height=42,
-                      corner_radius=9, fg_color="transparent", hover_color="#1a202b",
-                      text_color="#a7b0c2", font=("Segoe UI", 12),
-                      command=self._show_settings).pack(fill="x", padx=12, pady=3)
+        dock = ctk.CTkFrame(main, fg_color=SIDE, corner_radius=0)
+        dock.pack(side="bottom", fill="x")
+        inner = ctk.CTkFrame(dock, fg_color="transparent")
+        inner.pack(fill="x", padx=28, pady=14)
+        self.play_btn = ctk.CTkButton(inner, text="▶  GRAJ", width=190, height=48, corner_radius=10,
+                                      font=("Segoe UI", 15, "bold"), fg_color=ORANGE, hover_color=ORANGE_H,
+                                      text_color="#101116", command=self.play)
+        self.play_btn.pack(side="right")
+        self.status = ctk.CTkLabel(inner, text="Gotowy.", font=("Segoe UI", 12), text_color=MUTED,
+                                   anchor="w", justify="left", wraplength=420)
+        self.status.pack(side="left", fill="x", expand=True)
 
-        spacer = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        spacer.pack(fill="both", expand=True)
-        self.side_status = ctk.CTkFrame(self.sidebar, fg_color="#141a25",
-                                        corner_radius=11, border_width=1,
-                                        border_color="#202939")
-        self.side_status.pack(fill="x", padx=12, pady=(8, 12))
-        ctk.CTkLabel(self.side_status, text="STATUS LAUNCHERA", font=("Segoe UI", 9, "bold"),
-                     text_color="#78859b").pack(anchor="w", padx=12, pady=(12, 5))
-        status_row = ctk.CTkFrame(self.side_status, fg_color="transparent")
-        status_row.pack(fill="x", padx=12, pady=(0, 12))
-        ctk.CTkLabel(status_row, text="●", text_color="#69d69a",
-                     font=("Segoe UI", 12)).pack(side="left", padx=(0, 7))
-        ctk.CTkLabel(status_row, text="Gotowy do uruchomienia", text_color="#c5ccda",
-                     font=("Segoe UI", 10)).pack(side="left")
-        ctk.CTkLabel(self.sidebar, text="ORANGE CLIENT  •  WINDOWS", font=("Segoe UI", 9),
-                     text_color="#596579").pack(pady=(0, 18))
+    def _card(self, title):
+        card = ctk.CTkFrame(self.page, fg_color=PANEL, corner_radius=12, border_width=1, border_color=BORDER)
+        card.pack(fill="x", pady=6)
+        ctk.CTkLabel(card, text=title, font=("Segoe UI", 11, "bold"), text_color=ORANGE).pack(anchor="w", padx=16, pady=(12, 6))
+        return card
 
-        # Main content; the launch dock is a separate fixed region so Play is never below the fold.
-        self.content = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
-        self.content.pack(side="left", fill="both", expand=True)
-        self.topbar = ctk.CTkFrame(self.content, fg_color=BG, corner_radius=0)
-        self.topbar.pack(fill="x", padx=30, pady=(22, 8))
-        ctk.CTkLabel(self.topbar, text="ORANGE  /  GAME CENTER", font=("Segoe UI", 10, "bold"),
-                     text_color="#ff9140").pack(side="left")
-        ctk.CTkLabel(self.topbar, text="FABRIC EDITION", font=("Segoe UI", 10, "bold"),
-                     text_color="#78859b").pack(side="right")
+    def _set_nav(self, active):
+        for k, b in self.nav.items():
+            b.configure(fg_color="#231d1a" if k == active else "transparent",
+                        text_color=ORANGE if k == active else MUTED)
 
-        self.page_area = ctk.CTkFrame(self.content, fg_color=BG, corner_radius=0)
-        self.page_area.pack(fill="both", expand=True, padx=30, pady=(0, 8))
-        self._build_play_page()
-
-        self.dock = ctk.CTkFrame(self.content, fg_color="#10151e", corner_radius=0,
-                                 border_width=1, border_color="#202938")
-        self.dock.pack(side="bottom", fill="x")
-        dock_inner = ctk.CTkFrame(self.dock, fg_color="transparent")
-        dock_inner.pack(fill="x", padx=30, pady=15)
-        self.play_btn = ctk.CTkButton(
-            dock_inner, text="▶     PLAY  /  URUCHOM MINECRAFT", height=54,
-            corner_radius=12, font=("Segoe UI", 14, "bold"),
-            fg_color="#f47c20", hover_color="#ff963f", text_color="#101116",
-            command=self.play)
-        self.play_btn.pack(side="right", padx=(18, 0))
-        dock_info = ctk.CTkFrame(dock_inner, fg_color="transparent")
-        dock_info.pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(dock_info, text="GOTOWY DO GRY?", font=("Segoe UI", 10, "bold"),
-                     text_color="#ff9948").pack(anchor="w")
-        self.dock_status = ctk.CTkLabel(dock_info, text="Wybierz wersję i wpisz klucz licencji.",
-                                        font=("Segoe UI", 11), text_color="#a1abc0",
-                                        wraplength=390, justify="left")
-        self.dock_status.pack(anchor="w", pady=(3, 0))
-
-    def _build_play_page(self):
-        ctk.CTkLabel(self.page_area, text="Twój kolejny świat.", font=("Segoe UI", 30, "bold"),
-                     text_color=TEXT).pack(anchor="w", pady=(13, 2))
-        ctk.CTkLabel(self.page_area, text="Szybki start. Czysta konfiguracja. Orange Client.",
-                     font=("Segoe UI", 12), text_color=MUTED).pack(anchor="w", pady=(0, 17))
-
-        hero = ctk.CTkFrame(self.page_area, fg_color=CARD, corner_radius=15,
-                            border_width=1, border_color="#283243")
-        hero.pack(fill="x", pady=(0, 15))
-        hero_top = ctk.CTkFrame(hero, fg_color="transparent")
-        hero_top.pack(fill="x", padx=18, pady=(15, 12))
-        emblem = ctk.CTkFrame(hero_top, width=48, height=48, corner_radius=12,
-                              fg_color="#382316")
-        emblem.pack(side="left", padx=(0, 12))
-        emblem.pack_propagate(False)
-        ctk.CTkLabel(emblem, text="◈", font=("Segoe UI Symbol", 27, "bold"),
-                     text_color="#ff8a28").place(relx=.5, rely=.48, anchor="center")
-        hero_text = ctk.CTkFrame(hero_top, fg_color="transparent")
-        hero_text.pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(hero_text, text="ORANGE CLIENT", font=("Segoe UI", 17, "bold"),
-                     text_color=TEXT).pack(anchor="w")
-        ctk.CTkLabel(hero_text, text="MODDED MINECRAFT EXPERIENCE",
-                     font=("Segoe UI", 9, "bold"), text_color="#8d9ab0").pack(anchor="w", pady=(3, 0))
-        self.hero_badge = ctk.CTkLabel(hero_top, text="● ONLINE MANIFEST", corner_radius=7,
-                                      fg_color="#1b302b", text_color="#82dfb1",
-                                      font=("Segoe UI", 9, "bold"), padx=9, pady=6)
-        self.hero_badge.pack(side="right", anchor="n")
-        self.accent_line = ctk.CTkFrame(hero, height=3, fg_color="#ff7a18", corner_radius=0)
-        self.accent_line.pack(fill="x", side="bottom")
-
-        # Two-column control cards
-        grid = ctk.CTkFrame(self.page_area, fg_color="transparent")
-        grid.pack(fill="x")
-        grid.grid_columnconfigure(0, weight=1, uniform="col")
-        grid.grid_columnconfigure(1, weight=1, uniform="col")
-
-        version_card = ctk.CTkFrame(grid, fg_color=PANEL, corner_radius=13,
-                                    border_width=1, border_color="#202a39")
-        version_card.grid(row=0, column=0, sticky="nsew", padx=(0, 7), pady=(0, 12))
-        ctk.CTkLabel(version_card, text="01  /  WERSJA GRY", font=("Segoe UI", 10, "bold"),
-                     text_color="#ff9846").pack(anchor="w", padx=15, pady=(14, 7))
-        self.version_box = ctk.CTkComboBox(version_card, values=self.version_items or ["1.21.4"],
-                                           height=39, corner_radius=8, state="readonly",
-                                           border_color="#303a4b", button_color="#343e50",
-                                           button_hover_color="#46536a")
-        self.version_box.pack(fill="x", padx=14)
-        self.version_box.set(self.version_items[0] if self.version_items else "1.21.4")
-        ctk.CTkLabel(version_card, text="Wersje release od 1.21.4",
-                     font=("Segoe UI", 10), text_color=MUTED).pack(anchor="w", padx=15, pady=(7, 13))
-
-        login_card = ctk.CTkFrame(grid, fg_color=PANEL, corner_radius=13,
-                                  border_width=1, border_color="#202a39")
-        login_card.grid(row=0, column=1, sticky="nsew", padx=(7, 0), pady=(0, 12))
-        ctk.CTkLabel(login_card, text="02  /  PROFIL GRACZA", font=("Segoe UI", 10, "bold"),
-                     text_color="#ff9846").pack(anchor="w", padx=15, pady=(14, 7))
-        self.mode_box = ctk.CTkSegmentedButton(login_card, values=["Offline", "Microsoft"],
-                                               command=self.on_mode, height=39,
-                                               selected_color="#e8751e",
-                                               selected_hover_color="#ff963f",
-                                               unselected_color="#202938",
-                                               unselected_hover_color="#2b3648")
-        self.mode_box.pack(fill="x", padx=14)
-        self.mode_box.set("Offline")
-        self.username_entry = ctk.CTkEntry(login_card, textvariable=self.username, height=35,
-                                           corner_radius=8, placeholder_text="Nazwa gracza offline",
-                                           border_color="#303a4b")
-        self.username_entry.pack(fill="x", padx=14, pady=(8, 13))
-
-        license_card = ctk.CTkFrame(self.page_area, fg_color=PANEL, corner_radius=13,
-                                    border_width=1, border_color="#202a39")
-        license_card.pack(fill="x", pady=(0, 12))
-        license_head = ctk.CTkFrame(license_card, fg_color="transparent")
-        license_head.pack(fill="x", padx=15, pady=(13, 7))
-        ctk.CTkLabel(license_head, text="03  /  KLUCZ LICENCJI", font=("Segoe UI", 10, "bold"),
-                     text_color="#ff9846").pack(side="left")
-        ctk.CTkLabel(license_head, text="WYMAGANY", font=("Segoe UI", 9, "bold"),
-                     text_color="#d6a06e").pack(side="right")
-        self.license_entry = ctk.CTkEntry(license_card, textvariable=self.license_key,
-                                          height=39, corner_radius=8, show="•",
-                                          placeholder_text="Wklej klucz Orange Client",
-                                          border_color="#303a4b")
-        self.license_entry.pack(fill="x", padx=14, pady=(0, 14))
-
-        self.page_note = ctk.CTkLabel(self.page_area,
-            text="Instalator tworzy osobny profil Orange Client i nie modyfikuje folderu mods z innych launcherów.",
-            font=("Segoe UI", 10), text_color="#7f8ba0", wraplength=700, justify="left")
-        self.page_note.pack(anchor="w", pady=(0, 3))
-
-    def _clear_page(self):
-        for widget in self.page_area.winfo_children():
-            widget.destroy()
+    def _clear(self):
+        for w in self.page.winfo_children():
+            w.destroy()
 
     def _show_play(self):
-        self._clear_page()
-        self._build_play_page()
+        self._set_nav("play")
+        self._clear()
+        ctk.CTkLabel(self.page, text="Graj", font=("Segoe UI", 26, "bold"), text_color=TEXT).pack(anchor="w", pady=(0, 8))
 
-    def _show_installs(self):
-        self._clear_page()
-        ctk.CTkLabel(self.page_area, text="Wykryte instalacje", font=("Segoe UI", 27, "bold"),
-                     text_color=TEXT).pack(anchor="w", pady=(18, 5))
-        ctk.CTkLabel(self.page_area, text="Loader sprawdza typowe lokalizacje launcherów automatycznie.",
-                     font=("Segoe UI", 12), text_color=MUTED).pack(anchor="w", pady=(0, 18))
-        if not self.game_dirs:
-            entries = [("Nie wykryto istniejącej instalacji", DEFAULT_DIR)]
-        else:
-            entries = self.game_dirs
-        for label, path in entries:
-            card = ctk.CTkFrame(self.page_area, fg_color=PANEL, corner_radius=11,
-                                border_width=1, border_color="#202a39")
-            card.pack(fill="x", pady=5)
-            ctk.CTkLabel(card, text="●  " + label, font=("Segoe UI", 12, "bold"),
-                         text_color=TEXT).pack(anchor="w", padx=15, pady=(12, 2))
-            ctk.CTkLabel(card, text=str(path), font=("Segoe UI", 10),
-                         text_color=MUTED, wraplength=650, justify="left").pack(anchor="w", padx=15, pady=(0, 12))
-        ctk.CTkLabel(self.page_area, text="Orange Client uruchamia się w oddzielnym profilu, aby nie nadpisywać cudzych modów.",
-                     font=("Segoe UI", 11), text_color="#ffad69", wraplength=700).pack(anchor="w", pady=16)
+        c = self._card("WERSJA")
+        self.version_box = ctk.CTkComboBox(c, values=SUPPORTED_VERSIONS, state="readonly", height=36,
+                                           border_color=BORDER, button_color="#2b3446")
+        self.version_box.set(self.settings.get("version", SUPPORTED_VERSIONS[0]) if self.settings.get("version") in SUPPORTED_VERSIONS else SUPPORTED_VERSIONS[0])
+        self.version_box.pack(fill="x", padx=16, pady=(0, 14))
+
+        c = self._card("KONTO")
+        seg = ctk.CTkSegmentedButton(c, values=["Microsoft", "Offline"], command=self._on_mode, height=34,
+                                     selected_color="#e8751e", selected_hover_color=ORANGE_H,
+                                     unselected_color="#1f2736", unselected_hover_color="#2a3447")
+        seg.set("Microsoft" if self.mode.get() == "microsoft" else "Offline")
+        seg.pack(fill="x", padx=16)
+        self.account_row = ctk.CTkFrame(c, fg_color="transparent")
+        self.account_row.pack(fill="x", padx=16, pady=(10, 14))
+        self.offline_entry = ctk.CTkEntry(self.account_row, textvariable=self.username, height=34,
+                                          placeholder_text="Nazwa gracza (3-16 znaków)", border_color=BORDER)
+        self.account_label = ctk.CTkLabel(self.account_row, text="", font=("Segoe UI", 12), text_color=TEXT, anchor="w")
+        self.login_btn = ctk.CTkButton(self.account_row, text="Zaloguj przez Microsoft", width=180, height=34,
+                                       fg_color="#2b3446", hover_color="#38445b", command=self._login_clicked)
+        self.logout_btn = ctk.CTkButton(self.account_row, text="Wyloguj", width=90, height=34,
+                                        fg_color="#2b3446", hover_color="#38445b", command=self._logout)
+        self._layout_account_row()
+
+        c = self._card("KLUCZ LICENCJI")
+        row = ctk.CTkFrame(c, fg_color="transparent")
+        row.pack(fill="x", padx=16, pady=(0, 14))
+        self.key_entry = ctk.CTkEntry(row, textvariable=self.license_key, height=36, show="•",
+                                      placeholder_text="Wklej klucz (zapisze się automatycznie)", border_color=BORDER)
+        self.key_entry.pack(side="left", fill="x", expand=True)
+        self.show_key = ctk.CTkCheckBox(row, text="Pokaż", width=70, command=self._toggle_key)
+        self.show_key.pack(side="left", padx=(12, 0))
+
+    def _toggle_key(self):
+        self.key_entry.configure(show="" if self.show_key.get() else "•")
 
     def _show_settings(self):
-        self._clear_page()
-        ctk.CTkLabel(self.page_area, text="Ustawienia", font=("Segoe UI", 27, "bold"),
-                     text_color=TEXT).pack(anchor="w", pady=(18, 5))
-        ctk.CTkLabel(self.page_area, text="Informacje o aktualnej konfiguracji launchera.",
-                     font=("Segoe UI", 12), text_color=MUTED).pack(anchor="w", pady=(0, 18))
-        for title, detail in [
-            ("Katalog gry", str(APPDATA / "OrangeClientLoader" / "instances")),
-            ("Silnik modów", "Fabric Loader"),
-            ("Zakres wersji", "Minecraft release 1.21.4 i nowsze na liście; sam mod wymaga portu na nowsze wydania."),
-            ("Konto", "Tryb offline jest dostępny. Własne logowanie Microsoft OAuth nie jest jeszcze zintegrowane."),
-        ]:
-            card = ctk.CTkFrame(self.page_area, fg_color=PANEL, corner_radius=11,
-                                border_width=1, border_color="#202a39")
-            card.pack(fill="x", pady=5)
-            ctk.CTkLabel(card, text=title.upper(), font=("Segoe UI", 9, "bold"),
-                         text_color="#ff9846").pack(anchor="w", padx=15, pady=(11, 3))
-            ctk.CTkLabel(card, text=detail, font=("Segoe UI", 11), text_color="#c2cada",
-                         wraplength=670, justify="left").pack(anchor="w", padx=15, pady=(0, 11))
+        self._set_nav("settings")
+        self._clear()
+        ctk.CTkLabel(self.page, text="Ustawienia", font=("Segoe UI", 26, "bold"), text_color=TEXT).pack(anchor="w", pady=(0, 8))
+        c = self._card("FOLDER GRY")
+        ctk.CTkLabel(c, text=str(INSTANCES), text_color=MUTED, font=("Segoe UI", 11), anchor="w").pack(fill="x", padx=16)
+        ctk.CTkButton(c, text="Otwórz folder", width=130, height=32, fg_color="#2b3446", hover_color="#38445b",
+                      command=self._open_dir).pack(anchor="w", padx=16, pady=(8, 14))
+        c = self._card("AZURE CLIENT ID (logowanie Microsoft)")
+        self.cid_var = tk.StringVar(value=self._client_id())
+        ctk.CTkEntry(c, textvariable=self.cid_var, height=34, border_color=BORDER,
+                     placeholder_text="np. 00000000-0000-0000-0000-000000000000").pack(fill="x", padx=16)
+        ctk.CTkButton(c, text="Zapisz", width=90, height=32, fg_color="#2b3446", hover_color="#38445b",
+                      command=self._save_cid).pack(anchor="w", padx=16, pady=(8, 14))
 
-    def _animate_accent(self):
-        if not self.winfo_exists():
-            return
-        color = ACCENTS[self._anim_index % len(ACCENTS)]
-        self._anim_index += 1
+    def _open_dir(self):
+        INSTANCES.mkdir(parents=True, exist_ok=True)
         try:
-            self.accent_line.configure(fg_color=color)
-            self.nav_play.configure(border_width=1, border_color=color)
-            self.after(520, self._animate_accent)
-        except tk.TclError:
-            pass
+            os.startfile(str(INSTANCES))  # type: ignore[attr-defined]
+        except AttributeError:
+            webbrowser.open(INSTANCES.as_uri())
 
-    def on_mode(self, value):
-        is_offline = value == "Offline"
-        self.mode.set("offline" if is_offline else "microsoft")
-        self.username_entry.configure(state="normal" if is_offline else "disabled")
-        if is_offline:
-            self.dock_status.configure(text="Tryb offline: serwery mogą wymagać konta premium.")
+    def _save_cid(self):
+        self.settings["azure_client_id"] = self.cid_var.get().strip()
+        save_settings(self.settings)
+        self.status.configure(text="Zapisano Client ID.")
+
+    # ---- konto ------------------------------------------------------------------------------
+    def _on_mode(self, value):
+        self.mode.set("microsoft" if value == "Microsoft" else "offline")
+        self._persist()
+        self._layout_account_row()
+
+    def _layout_account_row(self):
+        for w in (self.offline_entry, self.account_label, self.login_btn, self.logout_btn):
+            w.pack_forget()
+        if self.mode.get() == "offline":
+            self.offline_entry.pack(fill="x")
+            return
+        if self.account:
+            self.account_label.configure(text=f"● Zalogowano jako {self.account['name']}", text_color=GREEN)
+            self.account_label.pack(side="left", fill="x", expand=True)
+            self.logout_btn.pack(side="right")
         else:
-            self.dock_status.configure(text="Microsoft OAuth nie jest jeszcze zintegrowany. Przycisk Play otworzy oficjalny launcher.")
-    
-    def refresh_versions(self):
-        self.version_items = available_versions()
-        self.version_box.configure(values=self.version_items or ["1.21.4"])
-        self.version_box.set(self.version_items[0] if self.version_items else "1.21.4")
-        self.dock_status.configure(text=f"Wykryto {len(self.game_dirs)} lokalizacji launcherów. Wybierz wersję i wpisz klucz.")
+            self.account_label.configure(text="Nie zalogowano", text_color=MUTED)
+            self.account_label.pack(side="left", fill="x", expand=True)
+            self.login_btn.pack(side="right")
 
+    def _refresh_account_label(self):
+        if hasattr(self, "account_row") and self.account_row.winfo_exists():
+            self._layout_account_row()
+
+    def _login_clicked(self):
+        cid = self._client_id()
+        if not cid:
+            messagebox.showinfo("Logowanie Microsoft",
+                                "Brak Azure Client ID. Wklej go w Ustawieniach (instrukcja w README loadera).")
+            self._show_settings()
+            return
+        self.login_btn.configure(state="disabled", text="Czekam na przeglądarkę…")
+        self.status.configure(text="Dokończ logowanie w przeglądarce.")
+        threading.Thread(target=self._login_worker, args=(cid,), daemon=True).start()
+
+    def _login_worker(self, cid):
+        try:
+            data = microsoft_login(cid)
+            self.account = {"id": data["id"], "name": data["name"], "refresh": data["refresh_token"]}
+            self._persist()
+            self.ui(lambda: self.status.configure(text=f"Zalogowano jako {data['name']}."))
+        except Exception as exc:
+            msg = humanize_login_error(exc)
+            self.ui(lambda: messagebox.showerror("Logowanie nie powiodło się", msg))
+        finally:
+            self.ui(lambda: (self.login_btn.configure(state="normal", text="Zaloguj przez Microsoft"),
+                             self._refresh_account_label()))
+
+    def _logout(self):
+        self.account = None
+        self._persist()
+        self._layout_account_row()
+        self.status.configure(text="Wylogowano.")
+
+    def _silent_refresh(self):
+        """Przy starcie odświeża sesję, żeby było widać, że konto nadal jest zalogowane."""
+        cid = self._client_id()
+        if not (cid and self.account):
+            return
+        try:
+            data = mll.microsoft_account.complete_refresh(cid, None, None, self.account["refresh"])
+            self.account = {"id": data["id"], "name": data["name"], "refresh": data["refresh_token"]}
+            self._persist()
+        except Exception:
+            pass  # zostaje zapamiętane konto; błąd pojawi się dopiero przy grze
+        self.ui(self._refresh_account_label)
+
+    # ---- uruchamianie -----------------------------------------------------------------------
     def play(self):
         if self._busy:
             return
-        if self.mode.get() == "microsoft":
-            candidates = [
-                Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Minecraft Launcher" / "MinecraftLauncher.exe",
-                APPDATA / "Minecraft Launcher" / "MinecraftLauncher.exe",
-                Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Minecraft Launcher" / "MinecraftLauncher.exe",
-            ]
-            exe = next((p for p in candidates if p.exists()), None)
-            if exe:
-                try:
-                    subprocess.Popen([str(exe)])
-                    messagebox.showinfo("Logowanie Microsoft",
-                        "Otworzyłem oficjalny launcher. Zaloguj się tam i uruchom właściwy profil Fabric.\n\nTen prototyp nie przejmuje sesji ani tokenów z innego launchera.")
-                except OSError as exc:
-                    messagebox.showerror("Błąd", str(exc))
-            else:
-                messagebox.showinfo("Microsoft", "Nie znaleziono oficjalnego launchera. Własne logowanie Microsoft OAuth nie jest jeszcze zaimplementowane.")
-            return
-        if not minecraft_launcher_lib:
-            messagebox.showerror("Brak zależności", "Uruchom build.bat, aby zainstalować wymagane biblioteki.")
-            return
-        version, username, key = self.version_box.get().strip(), self.username.get().strip(), self.license_key.get().strip()
-        if version not in self.version_items:
-            messagebox.showerror("Brak wersji", "Wybierz wersję z listy.")
-            return
-        if not re.fullmatch(r"[A-Za-z0-9_]{3,16}", username):
-            messagebox.showerror("Nieprawidłowa nazwa", "Nazwa offline musi mieć 3–16 znaków: litery, cyfry lub podkreślenie.")
-            return
+        version = self.version_box.get().strip()
+        key = self.license_key.get().strip()
         if not key:
             messagebox.showerror("Brak licencji", "Wpisz klucz licencji Orange Client.")
             return
-        self.current_dir = APPDATA / "OrangeClientLoader" / "instances" / version
-        try:
-            config = self.current_dir / "config"
-            config.mkdir(parents=True, exist_ok=True)
-            (config / "orangeclient_license.json").write_text(json.dumps({"key": key}), encoding="utf-8")
-        except OSError as exc:
-            messagebox.showerror("Błąd zapisu", str(exc))
+        microsoft = self.mode.get() == "microsoft"
+        username = self.username.get().strip()
+        if microsoft:
+            if not self.account:
+                messagebox.showinfo("Konto", "Najpierw zaloguj się przez Microsoft albo wybierz tryb Offline.")
+                return
+        elif not re.fullmatch(r"[A-Za-z0-9_]{3,16}", username):
+            messagebox.showerror("Nieprawidłowa nazwa", "Nazwa offline: 3–16 znaków, litery, cyfry lub _.")
             return
+        self.settings["version"] = version
+        self._persist()
         self._busy = True
-        self.play_btn.configure(state="disabled", text="◌   PRZYGOTOWYWANIE GRY…")
-        self.dock_status.configure(text="Pobieranie plików gry i przygotowanie profilu Fabric…")
-        threading.Thread(target=self._launch, args=(version, username), daemon=True).start()
+        self.play_btn.configure(state="disabled", text="PRZYGOTOWANIE…")
+        threading.Thread(target=self._launch, args=(version, key, microsoft, username), daemon=True).start()
 
-    def _launch(self, version, username):
+    def _set_status(self, text):
+        self.ui(lambda: self.status.configure(text=text))
+
+    def _launch(self, version, key, microsoft, username):
         try:
-            minecraft_launcher_lib.install.install_minecraft_version(version, str(self.current_dir))
-            launch_version = version
-            if version == "1.21.4":
-                minecraft_launcher_lib.fabric.install_fabric(version, str(self.current_dir))
-                installed = minecraft_launcher_lib.utils.get_installed_versions(str(self.current_dir))
-                profiles = [v.get("id") for v in installed if "fabric" in v.get("id", "").lower() and "1.21.4" in v.get("id", "")]
-                if profiles:
-                    launch_version = profiles[0]
-                bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "client-mods" / "orange-client-0.1.0.jar"
-                mods = self.current_dir / "mods"
-                mods.mkdir(parents=True, exist_ok=True)
-                if bundled.exists():
-                    shutil.copy2(bundled, mods / "orange-client-0.1.0.jar")
-                else:
-                    raise RuntimeError("Brak wbudowanego pliku moda Orange Client w loaderze.")
-                api = "https://api.modrinth.com/v2/project/fabric-api/version?" + urllib.parse.urlencode({
-                    "game_versions": json.dumps(["1.21.4"]), "loaders": json.dumps(["fabric"])})
-                req = urllib.request.Request(api, headers={"User-Agent": "OrangeClientLoader/1.0"})
-                with urllib.request.urlopen(req, timeout=20) as response:
-                    api_versions = json.loads(response.read().decode("utf-8"))
-                if api_versions:
-                    files = api_versions[0].get("files", [])
-                    if files:
-                        file_info = next((file for file in files if file.get("primary")), files[0])
-                        urllib.request.urlretrieve(file_info["url"], mods / file_info["filename"])
+            game_dir = INSTANCES / version
+            (game_dir / "config").mkdir(parents=True, exist_ok=True)
+            (game_dir / "config" / "orangeclient_license.json").write_text(json.dumps({"key": key}), encoding="utf-8")
+
+            options = {"gameDirectory": str(game_dir)}
+            if microsoft:
+                self._set_status("Odświeżanie sesji Microsoft…")
+                cid = self._client_id()
+                if not cid:
+                    raise RuntimeError("Brak Azure Client ID (Ustawienia).")
+                data = mll.microsoft_account.complete_refresh(cid, None, None, self.account["refresh"])
+                self.account = {"id": data["id"], "name": data["name"], "refresh": data["refresh_token"]}
+                self._persist()
+                options.update({"username": data["name"], "uuid": data["id"], "token": data["access_token"]})
             else:
-                raise RuntimeError("Orange Client jest obecnie zbudowany dla Minecraft 1.21.4. Inne wersje są widoczne na liście, ale wymagają portu moda.")
-            options = {"username": username, "uuid": "00000000-0000-0000-0000-000000000000",
-                       "token": "", "gameDirectory": str(self.current_dir)}
-            command = minecraft_launcher_lib.command.get_minecraft_command(launch_version, str(self.current_dir), options)
-            subprocess.Popen(command, cwd=str(self.current_dir))
-            self.after(0, lambda: self.dock_status.configure(text="Proces gry uruchomiony. Weryfikacja licencji odbywa się po starcie klienta."))
+                options.update({"username": username, "uuid": "00000000-0000-0000-0000-000000000000", "token": ""})
+
+            cb = {"setStatus": lambda t: self._set_status(t)}
+            self._set_status("Sprawdzanie plików gry…")
+            mll.install.install_minecraft_version(version, str(game_dir), callback=cb)
+
+            fabric_id = next((v["id"] for v in mll.utils.get_installed_versions(str(game_dir))
+                              if v["id"].startswith("fabric-loader-") and v["id"].endswith("-" + version)), None)
+            if not fabric_id:
+                self._set_status("Instalacja Fabric…")
+                java = None
+                try:
+                    vjson = json.loads((game_dir / "versions" / version / f"{version}.json").read_text(encoding="utf-8"))
+                    comp = vjson.get("javaVersion", {}).get("component")
+                    java = mll.runtime.get_executable_path(comp, str(game_dir)) if comp else None
+                except (OSError, ValueError):
+                    pass
+                mll.fabric.install_fabric(version, str(game_dir), callback=cb, java=java)
+                fabric_id = next(v["id"] for v in mll.utils.get_installed_versions(str(game_dir))
+                                 if v["id"].startswith("fabric-loader-") and v["id"].endswith("-" + version))
+
+            mods = game_dir / "mods"
+            mods.mkdir(exist_ok=True)
+            bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "client-mods" / MOD_JAR
+            if not bundled.exists():
+                raise RuntimeError("Brak wbudowanego pliku moda Orange Client w loaderze.")
+            shutil.copy2(bundled, mods / MOD_JAR)
+            if not any(p.name.startswith("fabric-api") for p in mods.glob("*.jar")):
+                self._set_status("Pobieranie Fabric API…")
+                self._download_fabric_api(version, mods)
+
+            self._set_status("Uruchamianie gry…")
+            command = mll.command.get_minecraft_command(fabric_id, str(game_dir), options)
+            if os.name == "nt" and command and command[0].lower().endswith("java.exe"):
+                javaw = command[0][:-8] + "javaw.exe"
+                if os.path.exists(javaw):
+                    command[0] = javaw
+            subprocess.Popen(command, cwd=str(game_dir))
+            self._set_status("Gra uruchomiona. Licencja jest sprawdzana po starcie klienta.")
         except Exception as exc:
-            error = str(exc)
-            self.after(0, lambda error=error: messagebox.showerror("Nie udało się uruchomić", error))
-            self.after(0, lambda: self.dock_status.configure(text="Uruchomienie nie powiodło się. Sprawdź komunikat błędu."))
+            error = humanize_login_error(exc)
+            self.ui(lambda: messagebox.showerror("Nie udało się uruchomić", error))
+            self._set_status("Uruchomienie nie powiodło się.")
         finally:
-            def finish():
-                self._busy = False
-                self.play_btn.configure(state="normal", text="▶     PLAY  /  URUCHOM MINECRAFT")
-            self.after(0, finish)
+            self.ui(lambda: (setattr(self, "_busy", False), self.play_btn.configure(state="normal", text="▶  GRAJ")))
+
+    @staticmethod
+    def _download_fabric_api(version, mods):
+        api = "https://api.modrinth.com/v2/project/fabric-api/version?" + urllib.parse.urlencode(
+            {"game_versions": json.dumps([version]), "loaders": json.dumps(["fabric"])})
+        req = urllib.request.Request(api, headers={"User-Agent": "OrangeClientLoader/1.1"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            versions = json.loads(r.read().decode("utf-8"))
+        if not versions:
+            raise RuntimeError("Nie znaleziono Fabric API dla tej wersji.")
+        files = versions[0].get("files", [])
+        info = next((f for f in files if f.get("primary")), files[0])
+        urllib.request.urlretrieve(info["url"], mods / info["filename"])
 
 
 if __name__ == "__main__":
-    if ctk is None or minecraft_launcher_lib is None:
+    if ctk is None or mll is None:
         root = tk.Tk()
         root.withdraw()
-        messagebox.showerror("Brak zależności", "Zbuduj loader przez build.bat lub uruchom: py -m pip install -r requirements.txt")
-        root.destroy()
+        messagebox.showerror("Brak zależności", "Uruchom: py -m pip install -r requirements.txt")
         sys.exit(1)
     Loader().mainloop()
