@@ -5,7 +5,6 @@ import com.example.orangeclient.util.UiFont;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Util;
@@ -39,6 +38,10 @@ public final class Notifications {
     private Notifications() { }
 
     public static void push(String name, boolean on) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        // W samym menu Orange Client nie pokazujemy toastow i nie odtwarzamy dodatkowego dzwieku.
+        if (mc.currentScreen instanceof ClickGui) return;
+
         LIST.removeIf(n -> n.name.equals(name));      // ten sam modul: nowe powiadomienie zastepuje stare
         Notif n = new Notif();
         n.name = name;
@@ -48,10 +51,7 @@ public final class Notifications {
         while (LIST.size() > MAX) LIST.remove(0);
 
         // Krotki sygnal przy nowym powiadomieniu; bez dzwieku, gdy gracz nie jest jeszcze zaladowany.
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player != null) {
-            mc.player.playSound(SoundEvents.BLOCK_NOTE_BLOCK_PLING.value(), 0.65F, on ? 1.25F : 0.9F);
-        }
+        ClickGui.playToggleSound(mc);
     }
 
     private static MutableText font(Text t) { return UiFont.apply(t); }
@@ -103,11 +103,16 @@ public final class Notifications {
     private static float clamp01(float v) { return Math.max(0f, Math.min(1f, v)); }
 
     public static void render(DrawContext ctx) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.currentScreen instanceof ClickGui) {
+            LIST.clear();
+            lastFrame = 0;
+            return;
+        }
         if (LIST.isEmpty() || !Hud.notifVisible()) {
             lastFrame = 0;
             return;
         }
-        MinecraftClient mc = MinecraftClient.getInstance();
         TextRenderer tr = mc.textRenderer;
         final long now = Util.getMeasuringTimeMs();
         float dt = lastFrame == 0 ? 0.016f : Math.min(0.1f, (now - lastFrame) / 1000f);
