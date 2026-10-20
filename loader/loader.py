@@ -3,8 +3,9 @@ import os
 import re
 import subprocess
 import threading
+import urllib.request
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import messagebox
 from pathlib import Path
 
 try:
@@ -21,38 +22,67 @@ DEFAULT_DIR = APPDATA / ".minecraft"
 
 def discover_game_dirs():
     candidates = [
-        ("Minecraft — oficjalny launcher", DEFAULT_DIR),
-        ("Modrinth App", APPDATA / "com.modrinth.theseus" / "profiles"),
-        ("Modrinth App (Roaming)", APPDATA / "ModrinthApp" / "profiles"),
-        ("Prism Launcher", APPDATA / "PrismLauncher" / "instances"),
+        ("Minecraft", APPDATA / ".minecraft"),
+        ("Modrinth", APPDATA / "com.modrinth.theseus"),
+        ("Modrinth", APPDATA / "ModrinthApp"),
+        ("Prism", APPDATA / "PrismLauncher" / "instances"),
         ("MultiMC", APPDATA / "MultiMC" / "instances"),
+        ("ATLauncher", APPDATA / "ATLauncher" / "Instances"),
+        ("CurseForge", Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "CurseForge" / "Minecraft" / "Instances"),
     ]
-    found = []
-    for label, path in candidates:
-        if not path.exists():
+    found, seen = [], set()
+    def add(label, path):
+        try:
+            path = path.resolve()
+            if path.is_dir() and str(path).lower() not in seen:
+                found.append((label, path))
+                seen.add(str(path).lower())
+        except OSError:
+            pass
+    for label, root in candidates:
+        if not root.exists():
             continue
-        if label.startswith(("Modrinth", "Prism", "MultiMC")):
-            try:
-                children = sorted(p for p in path.iterdir() if p.is_dir())
-            except OSError:
-                children = []
-            for child in children:
-                options = [child / ".minecraft", child / "minecraft"]
-                game = next((p for p in options if (p / "versions").is_dir()), None)
-                if game:
-                    found.append((f"{label} · {child.name}", game))
-                elif (child / "versions").is_dir():
-                    found.append((f"{label} · {child.name}", child))
-        elif (path / "versions").is_dir():
-            found.append((label, path))
-    # Deduplicate by normalized path.
-    unique, seen = [], set()
-    for label, path in found:
-        key = str(path.resolve()).lower()
-        if key not in seen:
-            unique.append((label, path))
-            seen.add(key)
-    return unique
+        if (root / "versions").is_dir():
+            add(label, root)
+        try:
+            for child in root.iterdir():
+                if not child.is_dir():
+                    continue
+                for candidate in (child, child / ".minecraft", child / "minecraft", child / "game"):
+                    if (candidate / "versions").is_dir():
+                        add(f"{label} · {child.name}", candidate)
+                try:
+                    for sub in child.iterdir():
+                        if sub.is_dir():
+                            for candidate in (sub, sub / ".minecraft", sub / "minecraft"):
+                                if (candidate / "versions").is_dir():
+                                    add(f"{label} · {child.name}/{sub.name}", candidate)
+                except OSError:
+                    pass
+        except OSError:
+            pass
+    if not found:
+        add("Minecraft", DEFAULT_DIR)
+    return found
+
+
+def available_versions():
+    try:
+        req = urllib.request.Request(
+            "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+            headers={"User-Agent": "OrangeClientLoader/1.0"})
+        with urllib.request.urlopen(req, timeout=12) as response:
+            manifest = json.loads(response.read().decode("utf-8"))
+        out = []
+        for item in manifest.get("versions", []):
+            vid = item.get("id", "")
+            if item.get("type") == "release" and re.match(r"^1\.(21|22|23|24)\.", vid):
+                nums = tuple(int(x) for x in re.findall(r"\d+", vid))
+                if nums >= (1, 21, 4):
+                    out.append(vid)
+        return out or ["1.21.4"]
+    except Exception:
+        return ["1.21.4"]
 
 
 class Loader(ctk.CTk if ctk else object):
@@ -121,9 +151,7 @@ class Loader(ctk.CTk if ctk else object):
                                            height=40, corner_radius=9, state="readonly")
         self.install_box.pack(side="left", fill="x", expand=True)
         self.install_box.set(labels[0])
-        ctk.CTkButton(install_row, text="Wybierz folder", width=115, height=40,
-                      command=self.choose_folder, fg_color="#272e3d",
-                      hover_color="#343d50").pack(side="left", padx=(8, 0))
+        ctk.CTkLabel(install_row, text="Wykryte automatycznie", text_color="#7f8ba3", font=("Segoe UI", 10)).pack(anchor="w", pady=(4, 0))
 
         row = ctk.CTkFrame(main, fg_color="transparent")
         row.pack(fill="x", pady=(0, 14))
@@ -133,12 +161,10 @@ class Loader(ctk.CTk if ctk else object):
         right.pack(side="left", fill="x", expand=True, padx=(8, 0))
         ctk.CTkLabel(left, text="WERSJA MINECRAFT / FABRIC", font=("Segoe UI", 11, "bold"),
                      text_color="#a8b0c2").pack(anchor="w", pady=(0, 6))
-        self.version_box = ctk.CTkComboBox(left, values=["Skanowanie…"], height=40,
-                                           corner_radius=9, state="readonly")
+        self.version_box = ctk.CTkComboBox(left, values=self.version_items or ["1.21.4"], height=40, corner_radius=9, state="readonly")
         self.version_box.pack(fill="x")
-        ctk.CTkButton(left, text="Odśwież wersje", height=30, command=self.refresh_versions,
-                      fg_color="transparent", border_width=1, border_color="#333b4d",
-                      hover_color="#202634").pack(anchor="w", pady=(6, 0))
+        self.version_box.set(self.version_items[0] if self.version_items else "1.21.4")
+        ctk.CTkLabel(left, text="Wydania od 1.21.4 do najnowszego", text_color="#7f8ba3", font=("Segoe UI", 10)).pack(anchor="w", pady=(6, 0))
         ctk.CTkLabel(right, text="SPOSÓB LOGOWANIA", font=("Segoe UI", 11, "bold"),
                      text_color="#a8b0c2").pack(anchor="w", pady=(0, 6))
         self.mode_box = ctk.CTkSegmentedButton(right, values=["Offline", "Microsoft"],
@@ -172,18 +198,6 @@ class Loader(ctk.CTk if ctk else object):
                 break
         self.refresh_versions()
 
-    def choose_folder(self):
-        chosen = filedialog.askdirectory(title="Wybierz folder gry Minecraft")
-        if not chosen:
-            return
-        path = Path(chosen)
-        if not (path / "versions").is_dir():
-            messagebox.showerror("Nie znaleziono wersji", "Wybrany folder musi zawierać katalog 'versions'.")
-            return
-        self.current_dir = path
-        self.install_box.set(f"Własny folder  —  {path}")
-        self.refresh_versions()
-
     def on_mode(self, value):
         is_offline = value == "Offline"
         self.mode.set("offline" if is_offline else "microsoft")
@@ -194,19 +208,10 @@ class Loader(ctk.CTk if ctk else object):
             self.status.configure(text="Microsoft: ta wersja loadera nie ma jeszcze własnego OAuth. Kliknij Play, aby otworzyć oficjalny launcher i zalogować się tam; uruchomienie profilu Microsoft bezpiecznie wymaga integracji OAuth.")
  
     def refresh_versions(self):
-        if not minecraft_launcher_lib:
-            return
-        try:
-            versions = minecraft_launcher_lib.utils.get_installed_versions(str(self.current_dir))
-            self.version_items = [v.get("id", "") for v in versions if v.get("id")]
-            self.version_box.configure(values=self.version_items or ["Brak wersji"])
-            self.version_box.set(self.version_items[0] if self.version_items else "Brak wersji")
-            self.status.configure(text=f"Znaleziono {len(self.version_items)} wersji w {self.current_dir}")
-        except Exception as exc:
-            self.version_items = []
-            self.version_box.configure(values=["Nie udało się odczytać wersji"])
-            self.version_box.set("Nie udało się odczytać wersji")
-            self.status.configure(text=f"Błąd skanowania: {exc}")
+        self.version_items = available_versions()
+        self.version_box.configure(values=self.version_items or ["1.21.4"])
+        self.version_box.set(self.version_items[0] if self.version_items else "1.21.4")
+        self.status.configure(text=f"Wersje pobierane z manifestu Mojang. Wykryto {len(self.game_dirs)} lokalizacji launcherów.")
 
     def play(self):
         if self.mode.get() == "microsoft":
