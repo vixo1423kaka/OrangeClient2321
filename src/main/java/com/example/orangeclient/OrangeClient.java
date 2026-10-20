@@ -3,6 +3,7 @@ package com.example.orangeclient;
 import com.example.orangeclient.friend.Friends;
 import com.example.orangeclient.gui.ClickGui;
 import com.example.orangeclient.gui.Notifications;
+import com.example.orangeclient.gui.OrangeMainMenu;
 import com.example.orangeclient.license.LicenseManager;
 import com.example.orangeclient.module.Keybinds;
 import com.example.orangeclient.module.ModuleManager;
@@ -13,6 +14,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.TitleScreen;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,6 +42,10 @@ public class OrangeClient implements ClientModInitializer {
             if (client.player != null && client.world != null) LicenseManager.requireLicense(client);
             if (GuiModule.consumeOpen() && client.currentScreen == null && LicenseManager.isValid()) client.setScreen(new ClickGui());
             ModuleManager.onTick(client);
+            // Replace only Minecraft’s vanilla title screen with the animated Orange Client menu.
+            if (client.currentScreen instanceof TitleScreen) {
+                client.setScreen(new OrangeMainMenu());
+            }
         });
 
         // bindy modulow (srodkowy klik na module w GUI): sprawdzane co klatke, zeby nie gubic krotkich kliknien
