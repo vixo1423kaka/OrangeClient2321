@@ -167,7 +167,7 @@ public final class ModuleManager {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.player == null || mc.world == null) return;
         for (Module m : MODULES) {
-            if (!m.isEnabled() && !(m instanceof WaypointManager)) continue;
+            if (!m.isEnabled()) continue;
             m.onWorldRender(ctx, mc);
         }
     }
@@ -176,7 +176,7 @@ public final class ModuleManager {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.player == null || mc.world == null) return;
         for (Module m : MODULES) {
-            if (!m.isEnabled() && !(m instanceof WaypointManager)) continue;
+            if (!m.isEnabled()) continue;
             m.onHudRender(ctx, mc);
         }
     }
