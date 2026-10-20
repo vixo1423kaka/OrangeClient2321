@@ -201,9 +201,24 @@ class Loader(ctk.CTk if ctk else object):
         ctk.set_default_color_theme("dark-blue")
         super().__init__()
         self.title("Orange Client")
-        self.geometry("880x600")
+        self.geometry("920x640")
         self.minsize(820, 560)
-        self.configure(fg_color=BG)
+        self._borderless = os.name == "nt"
+        self._maximized = False
+        self._normal_geometry = "920x640"
+        self._drag_origin = None
+        # On Windows, use a color-keyed transparent desktop window so only the
+        # rounded app surface is visible outside its client area.
+        if self._borderless:
+            self.configure(fg_color="#ff00ff")
+            try:
+                self.attributes("-transparentcolor", "#ff00ff")
+                self.overrideredirect(True)
+            except tk.TclError:
+                self._borderless = False
+                self.configure(fg_color=BG)
+        else:
+            self.configure(fg_color=BG)
         icon_path = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "orange.ico"
         try:
             if icon_path.is_file():
@@ -264,8 +279,36 @@ class Loader(ctk.CTk if ctk else object):
 
     # ---- UI ---------------------------------------------------------------------------------
     def _build_ui(self):
-        side = ctk.CTkFrame(self, width=170, corner_radius=0, fg_color=SIDE)
-        side.pack(side="left", fill="y")
+        # Rounded application shell sits over a transparent color-key background.
+        self.shell = ctk.CTkFrame(self, fg_color=BG, corner_radius=24,
+                                  border_width=1, border_color=BORDER)
+        self.shell.pack(fill="both", expand=True, padx=2, pady=2)
+
+        # macOS-inspired title bar and three traffic-light controls.
+        titlebar = ctk.CTkFrame(self.shell, fg_color=SIDE, corner_radius=20, height=42)
+        titlebar.pack(fill="x", padx=2, pady=(2, 0))
+        titlebar.pack_propagate(False)
+        lights = ctk.CTkFrame(titlebar, fg_color="transparent")
+        lights.pack(side="left", padx=(14, 10), pady=10)
+        for color, hover, command in (
+            ("#ff5f57", "#ff817b", self._window_close),
+            ("#febc2e", "#ffd166", self._window_minimize),
+            ("#28c840", "#55df68", self._window_toggle_maximize),
+        ):
+            ctk.CTkButton(lights, text="", width=13, height=13, corner_radius=8,
+                          fg_color=color, hover_color=hover, border_width=0,
+                          command=command).pack(side="left", padx=(0, 7))
+        title = ctk.CTkLabel(titlebar, text="Orange Client", text_color="#c5cad4",
+                             font=("Segoe UI", 12, "bold"))
+        title.pack(side="left", padx=4)
+        for widget in (titlebar, title):
+            widget.bind("<ButtonPress-1>", self._drag_start)
+            widget.bind("<B1-Motion>", self._drag_motion)
+
+        content = ctk.CTkFrame(self.shell, fg_color="transparent", corner_radius=20)
+        content.pack(side="top", fill="both", expand=True, padx=2, pady=(2, 2))
+        side = ctk.CTkFrame(content, width=170, corner_radius=18, fg_color=SIDE)
+        side.pack(side="left", fill="y", padx=(0, 2))
         side.pack_propagate(False)
         ctk.CTkLabel(side, text="ORANGE", font=("Segoe UI", 20, "bold"), text_color=ORANGE).pack(anchor="w", padx=20, pady=(26, 0))
         ctk.CTkLabel(side, text="CLIENT", font=("Segoe UI", 11, "bold"), text_color=MUTED).pack(anchor="w", padx=20, pady=(0, 28))
@@ -277,22 +320,58 @@ class Loader(ctk.CTk if ctk else object):
             b.pack(fill="x", padx=10, pady=2)
             self.nav[key] = b
 
-        main = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
+        main = ctk.CTkFrame(content, fg_color="transparent", corner_radius=18)
         main.pack(side="left", fill="both", expand=True)
-        self.page = ctk.CTkFrame(main, fg_color=BG, corner_radius=0)
-        self.page.pack(fill="both", expand=True, padx=28, pady=(24, 8))
+        self.page = ctk.CTkFrame(main, fg_color="transparent", corner_radius=18)
+        self.page.pack(fill="both", expand=True, padx=28, pady=(20, 8))
 
-        dock = ctk.CTkFrame(main, fg_color=SIDE, corner_radius=0)
-        dock.pack(side="bottom", fill="x")
+        dock = ctk.CTkFrame(main, fg_color=SIDE, corner_radius=16)
+        dock.pack(side="bottom", fill="x", padx=2, pady=2)
         inner = ctk.CTkFrame(dock, fg_color="transparent")
-        inner.pack(fill="x", padx=28, pady=14)
-        self.play_btn = ctk.CTkButton(inner, text="▶  GRAJ", width=190, height=48, corner_radius=10,
+        inner.pack(fill="x", padx=24, pady=12)
+        self.play_btn = ctk.CTkButton(inner, text="▶  GRAJ", width=190, height=48, corner_radius=14,
                                       font=("Segoe UI", 15, "bold"), fg_color=ORANGE, hover_color=ORANGE_H,
                                       text_color="#101116", command=self.play)
         self.play_btn.pack(side="right")
         self.status = ctk.CTkLabel(inner, text="Gotowy.", font=("Segoe UI", 12), text_color=MUTED,
                                    anchor="w", justify="left", wraplength=420)
         self.status.pack(side="left", fill="x", expand=True)
+
+    def _drag_start(self, event):
+        if self._maximized:
+            return
+        self._drag_origin = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+
+    def _drag_motion(self, event):
+        if self._drag_origin and not self._maximized:
+            x = event.x_root - self._drag_origin[0]
+            y = event.y_root - self._drag_origin[1]
+            self.geometry(f"+{x}+{y}")
+
+    def _window_close(self):
+        self.destroy()
+
+    def _window_minimize(self):
+        if self._borderless:
+            self.overrideredirect(False)
+            self.iconify()
+            self.bind("<Map>", self._restore_borderless, add="+")
+        else:
+            self.iconify()
+
+    def _restore_borderless(self, _event=None):
+        if self._borderless:
+            self.after(120, lambda: self.overrideredirect(True) if self.winfo_exists() else None)
+
+    def _window_toggle_maximize(self):
+        if not self._maximized:
+            self._normal_geometry = self.geometry()
+            sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+            self.geometry(f"{sw - 24}x{sh - 64}+12+12")
+            self._maximized = True
+        else:
+            self.geometry(self._normal_geometry)
+            self._maximized = False
 
     def _card(self, title):
         card = ctk.CTkFrame(self.page, fg_color=PANEL, corner_radius=12, border_width=1, border_color=BORDER)
