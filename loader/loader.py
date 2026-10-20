@@ -314,7 +314,9 @@ class Loader(ctk.CTk if ctk else object):
                                            border_color=BORDER, button_color="#2b3446",
                                            command=self._on_version_changed)
         self.version_box.set(self.settings.get("version", SUPPORTED_VERSIONS[0]) if self.settings.get("version") in SUPPORTED_VERSIONS else SUPPORTED_VERSIONS[0])
-        self.version_box.pack(fill="x", padx=16, pady=(0, 14))
+        self.version_box.pack(fill="x", padx=16, pady=(0, 4))
+        ctk.CTkLabel(c, text="Orange Client jest obecnie dostępny dla 1.21.4. Pozostałe wersje uruchamiają Fabric i zgodne mody.",
+                     text_color=MUTED, font=("Segoe UI", 10), wraplength=620, justify="left").pack(anchor="w", padx=16, pady=(0, 12))
 
         c = self._card("KONTO")
         seg = ctk.CTkSegmentedButton(c, values=["Microsoft", "Offline"], command=self._on_mode, height=34,
