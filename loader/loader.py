@@ -203,12 +203,16 @@ class Loader(ctk.CTk if ctk else object):
         self.title("Orange Client")
         self.geometry("920x640")
         self.minsize(820, 560)
-        self._borderless = False
+        self._borderless = True
         self._maximized = False
         self._normal_geometry = "920x640"
         self._drag_origin = None
-        # Use the native OS frame so the launcher appears on the taskbar.
+        # Frameless macOS-style window. Keep the custom titlebar controls and drag support.
         self.configure(fg_color=BG)
+        try:
+            self.overrideredirect(True)
+        except tk.TclError:
+            self._borderless = False
         icon_path = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "orange.ico"
         try:
             if icon_path.is_file():
@@ -283,6 +287,9 @@ class Loader(ctk.CTk if ctk else object):
         title = ctk.CTkLabel(titlebar, text="ORANGE CLIENT", text_color="#c5cad4",
                              font=("Segoe UI", 12, "bold"))
         title.pack(side="left", padx=14)
+        for widget in (titlebar, title):
+            widget.bind("<ButtonPress-1>", self._drag_start)
+            widget.bind("<B1-Motion>", self._drag_motion)
         lights = ctk.CTkFrame(titlebar, fg_color="transparent")
         lights.pack(side="right", padx=(10, 14), pady=10)
         for color, hover, command in (
