@@ -201,6 +201,7 @@ class Loader(ctk.CTk if ctk else object):
         self.configure(fg_color=BG)
 
         self.settings = load_settings()
+        s = self.settings
         self.accounts = []  # zapisane konta: {"id","name","refresh"}
         for a in s.get("accounts", []):
             if a.get("refresh"):
