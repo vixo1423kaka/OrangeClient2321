@@ -34,6 +34,8 @@ public final class LicenseManager {
     private static volatile boolean checking = false;
     private static volatile long expiresAtMillis = -1L;
     private static volatile long serverDaysRemaining = -1L;
+    private static volatile long lastValidationMillis = 0L;
+    private static final long REVALIDATE_INTERVAL_MILLIS = Duration.ofMinutes(5).toMillis();
     private static String savedKey = "";
 
     private LicenseManager() { }
@@ -98,6 +100,16 @@ public final class LicenseManager {
         }
     }
 
+    /** Ponawia kontrole z serwerem co 5 minut, aby szybciej wykrywac cofniecie licencji. */
+    public static void refreshIfDue() {
+        if (checking || savedKey.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        if (now - lastValidationMillis >= REVALIDATE_INTERVAL_MILLIS) {
+            lastValidationMillis = now;
+            validate(savedKey);
+        }
+    }
+
     /** Wywolaj raz przy starcie (OrangeClient.onInitializeClient). */
     public static void init() {
         try {
@@ -111,7 +123,13 @@ public final class LicenseManager {
 
     /** Future zwraca null gdy klucz OK, w przeciwnym razie tekst bledu. */
     public static CompletableFuture<String> validate(String key) {
+        if (key == null || key.trim().isEmpty()) {
+            valid = false;
+            checking = false;
+            return CompletableFuture.completedFuture("Nieprawidlowy klucz");
+        }
         checking = true;
+        lastValidationMillis = System.currentTimeMillis();
         String k = key.trim();
         JsonObject body = new JsonObject();
         body.addProperty("key", k);
@@ -127,7 +145,19 @@ public final class LicenseManager {
                 .thenApply(res -> {
                     checking = false;
                     try {
+                        if (res.statusCode() < 200 || res.statusCode() >= 300) {
+                            valid = false;
+                            expiresAtMillis = -1L;
+                            serverDaysRemaining = -1L;
+                            return "Serwer odrzucil weryfikacje licencji";
+                        }
                         JsonObject o = GSON.fromJson(res.body(), JsonObject.class);
+                        if (o == null || !o.has("valid") || !o.get("valid").isJsonPrimitive()) {
+                            valid = false;
+                            expiresAtMillis = -1L;
+                            serverDaysRemaining = -1L;
+                            return "Nieprawidlowa odpowiedz serwera licencji";
+                        }
                         if (o.get("valid").getAsBoolean()) {
                             valid = true;
                             readExpiry(o);
@@ -140,6 +170,8 @@ public final class LicenseManager {
                         return o.has("message") ? o.get("message").getAsString() : "Nieprawidlowy klucz";
                     } catch (Exception e) {
                         valid = false;
+                        expiresAtMillis = -1L;
+                        serverDaysRemaining = -1L;
                         return "Blad odpowiedzi serwera";
                     }
                 })
