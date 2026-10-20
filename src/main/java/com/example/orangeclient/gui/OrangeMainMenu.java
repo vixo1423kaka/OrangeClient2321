@@ -74,9 +74,9 @@ public final class OrangeMainMenu extends Screen {
         ctx.fill(left, 38, left + 4, 91, ORANGE);
         ctx.drawTextWithShadow(textRenderer, Text.literal("ORANGE"), left + 17, 39, 0xFFFFFFFF);
         ctx.drawTextWithShadow(textRenderer, Text.literal("CLIENT"), left + 17, 57, ORANGE);
-        ctx.drawText(textRenderer, Text.literal("MINECRAFT • FABRIC EDITION"), left + 17, 78, 0xFF9299A7);
-        ctx.drawText(textRenderer, Text.literal("PLAY DIFFERENT."), left, height - 31, 0xFF737B89);
-        ctx.drawText(textRenderer, Text.literal("v0.1.0  /  1.21.4"), left + 120, height - 31, 0xFF4C5563);
+        ctx.drawText(textRenderer, Text.literal("MINECRAFT • FABRIC EDITION"), left + 17, 78, 0xFF9299A7, false);
+        ctx.drawText(textRenderer, Text.literal("PLAY DIFFERENT."), left, height - 31, 0xFF737B89, false);
+        ctx.drawText(textRenderer, Text.literal("v0.1.0  /  1.21.4"), left + 120, height - 31, 0xFF4C5563, false);
 
         for (int i = 0; i < LABELS.length; i++) {
             int y = buttonY + i * (buttonH + buttonGap);
