@@ -25,7 +25,7 @@ jobs:
           python -m pip install -r requirements.txt
       - name: Build EXE
         working-directory: loader
-        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name OrangeClientLoader loader.py
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --collect-all customtkinter --name OrangeClientLoader loader.py
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
