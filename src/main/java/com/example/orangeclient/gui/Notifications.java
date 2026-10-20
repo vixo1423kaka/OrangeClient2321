@@ -50,7 +50,7 @@ public final class Notifications {
         // Krotki sygnal przy nowym powiadomieniu; bez dzwieku, gdy gracz nie jest jeszcze zaladowany.
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.player != null) {
-            mc.player.playSound(SoundEvents.BLOCK_NOTE_BLOCK_PLING, 0.65F, on ? 1.25F : 0.9F);
+            mc.player.playSound(SoundEvents.BLOCK_NOTE_BLOCK_PLING.value(), 0.65F, on ? 1.25F : 0.9F);
         }
     }
 
