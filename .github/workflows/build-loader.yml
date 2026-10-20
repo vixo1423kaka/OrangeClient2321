@@ -40,6 +40,9 @@ jobs:
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
         run: |
           "AZURE_CLIENT_ID = '$($env:AZURE_CLIENT_ID)'" | Set-Content -Encoding utf8 _build_config.py
+      - name: Check Python syntax
+        working-directory: loader
+        run: python -m py_compile loader.py
       - name: Build EXE with bundled mod
         working-directory: loader
         run: python -m PyInstaller --noconfirm --clean --onefile --windowed --collect-all customtkinter --add-data "../build/libs/orange-client-0.1.0.jar;client-mods" --name OrangeClientLoader loader.py
