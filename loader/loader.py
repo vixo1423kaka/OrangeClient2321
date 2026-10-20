@@ -314,7 +314,7 @@ class Loader(ctk.CTk if ctk else object):
         ctk.CTkLabel(side, text="ORANGE", font=("Segoe UI", 20, "bold"), text_color=ORANGE).pack(anchor="w", padx=20, pady=(26, 0))
         ctk.CTkLabel(side, text="CLIENT", font=("Segoe UI", 11, "bold"), text_color=MUTED).pack(anchor="w", padx=20, pady=(0, 28))
         self.nav = {}
-        for key, label, cmd in (("play", "Graj", self._show_play), ("mods", "Mody", self._show_mods), ("settings", "Ustawienia", self._show_settings)):
+        for key, label, cmd in (("play", "Play", self._show_play), ("mods", "Mods", self._show_mods), ("settings", "Settings", self._show_settings)):
             b = ctk.CTkButton(side, text=label, anchor="w", height=38, corner_radius=8,
                               fg_color="transparent", hover_color="#1b2230", text_color=MUTED,
                               font=("Segoe UI", 13), command=cmd)
@@ -334,7 +334,7 @@ class Loader(ctk.CTk if ctk else object):
                                       font=("Segoe UI", 15, "bold"), fg_color=ORANGE, hover_color=ORANGE_H,
                                       text_color="#101116", command=self.play)
         self.play_btn.pack(side="right")
-        self.status = ctk.CTkLabel(inner, text="Gotowy.", font=("Segoe UI", 12), text_color=MUTED,
+        self.status = ctk.CTkLabel(inner, text="Ready.", font=("Segoe UI", 12), text_color=MUTED,
                                    anchor="w", justify="left", wraplength=420)
         self.status.pack(side="left", fill="x", expand=True)
 
@@ -403,9 +403,9 @@ class Loader(ctk.CTk if ctk else object):
     def _show_play(self):
         self._set_nav("play")
         self._clear()
-        ctk.CTkLabel(self.page, text="Graj", font=("Segoe UI", 26, "bold"), text_color=TEXT).pack(anchor="w", pady=(0, 8))
+        ctk.CTkLabel(self.page, text="Play", font=("Segoe UI", 26, "bold"), text_color=TEXT).pack(anchor="w", pady=(0, 8))
 
-        c = self._card("WERSJA")
+        c = self._card("VERSION")
         self.version_box = ctk.CTkComboBox(c, values=SUPPORTED_VERSIONS, state="readonly", height=36,
                                            border_color=BORDER, button_color="#2b3446",
                                            command=self._on_version_changed)
@@ -414,7 +414,7 @@ class Loader(ctk.CTk if ctk else object):
         ctk.CTkLabel(c, text="Orange Client jest obecnie dostępny dla 1.21.4. Pozostałe wersje uruchamiają Fabric i zgodne mody.",
                      text_color=MUTED, font=("Segoe UI", 10), wraplength=620, justify="left").pack(anchor="w", padx=16, pady=(0, 12))
 
-        c = self._card("KONTO")
+        c = self._card("ACCOUNT")
         seg = ctk.CTkSegmentedButton(c, values=["Microsoft", "Offline"], command=self._on_mode, height=34,
                                      selected_color="#e8751e", selected_hover_color=ORANGE_H,
                                      unselected_color="#1f2736", unselected_hover_color="#2a3447")
@@ -423,11 +423,11 @@ class Loader(ctk.CTk if ctk else object):
         self.account_row = ctk.CTkFrame(c, fg_color="transparent")
         self.account_row.pack(fill="x", padx=16, pady=(10, 14))
         self.offline_entry = ctk.CTkEntry(self.account_row, textvariable=self.username, height=34,
-                                          placeholder_text="Nazwa gracza (3-16 znaków)", border_color=BORDER)
+                                          placeholder_text="Player name (3–16 characters)", border_color=BORDER)
         self.account_box = ctk.CTkComboBox(self.account_row, values=[""], state="readonly", height=34,
                                            border_color=BORDER, button_color="#2b3446",
                                            command=self._on_account_pick)
-        self.login_btn = ctk.CTkButton(self.account_row, text="Zaloguj", width=90, height=34,
+        self.login_btn = ctk.CTkButton(self.account_row, text="Sign in", width=90, height=34,
                                        fg_color=ORANGE, hover_color=ORANGE_H, text_color="#101116",
                                        command=self._login_clicked)
         self.logout_btn = ctk.CTkButton(self.account_row, text="Wyloguj", width=90, height=34,
@@ -457,7 +457,7 @@ class Loader(ctk.CTk if ctk else object):
     def _show_mods(self):
         self._set_nav("mods")
         self._clear()
-        ctk.CTkLabel(self.page, text="Mody", font=("Segoe UI", 26, "bold"), text_color=TEXT).pack(anchor="w", pady=(0, 4))
+        ctk.CTkLabel(self.page, text="Mods", font=("Segoe UI", 26, "bold"), text_color=TEXT).pack(anchor="w", pady=(0, 4))
         ctk.CTkLabel(self.page, text="Wyszukuj i instaluj mody Fabric z Modrinth do wybranej instancji.",
                      font=("Segoe UI", 11), text_color=MUTED).pack(anchor="w", pady=(0, 12))
         row = ctk.CTkFrame(self.page, fg_color="transparent")
@@ -614,7 +614,7 @@ class Loader(ctk.CTk if ctk else object):
     def _show_settings(self):
         self._set_nav("settings")
         self._clear()
-        ctk.CTkLabel(self.page, text="Ustawienia", font=("Segoe UI", 26, "bold"), text_color=TEXT).pack(anchor="w", pady=(0, 8))
+        ctk.CTkLabel(self.page, text="Settings", font=("Segoe UI", 26, "bold"), text_color=TEXT).pack(anchor="w", pady=(0, 8))
         c = self._card("FOLDER GRY")
         ctk.CTkLabel(c, text=str(INSTANCES), text_color=MUTED, font=("Segoe UI", 11), anchor="w").pack(fill="x", padx=16)
         ctk.CTkButton(c, text="Otwórz folder", width=130, height=32, fg_color="#2b3446", hover_color="#38445b",
@@ -701,7 +701,7 @@ class Loader(ctk.CTk if ctk else object):
         cid = self._client_id()
         if not cid:
             messagebox.showinfo("Logowanie Microsoft",
-                                "Brak Azure Client ID. Wklej go w Ustawieniach (instrukcja w README loadera).")
+                                "Azure Client ID is missing. Add it in Settings (see the loader README).")
             self._show_settings()
             return
         hint = "" if (other or not self.choice) else self.choice.get("hint", "")
@@ -759,7 +759,7 @@ class Loader(ctk.CTk if ctk else object):
         username = self.username.get().strip()
         if microsoft:
             if not self.account:
-                messagebox.showinfo("Konto", "Najpierw zaloguj się przez Microsoft albo wybierz tryb Offline.")
+                messagebox.showinfo("Account", "Sign in with Microsoft or choose Offline mode first.")
                 return
         elif not re.fullmatch(r"[A-Za-z0-9_]{3,16}", username):
             messagebox.showerror("Nieprawidłowa nazwa", "Nazwa offline: 3–16 znaków, litery, cyfry lub _.")
@@ -784,7 +784,7 @@ class Loader(ctk.CTk if ctk else object):
                 self._set_status("Odświeżanie sesji Microsoft…")
                 cid = self._client_id()
                 if not cid:
-                    raise RuntimeError("Brak Azure Client ID (Ustawienia).")
+                    raise RuntimeError("Azure Client ID is missing (Settings).")
                 data = mll.microsoft_account.complete_refresh(cid, None, None, self.account["refresh"])
                 acc = self.account
                 acc["refresh"], acc["name"] = data["refresh_token"], data["name"]
@@ -794,13 +794,13 @@ class Loader(ctk.CTk if ctk else object):
                 options.update({"username": username, "uuid": "00000000-0000-0000-0000-000000000000", "token": ""})
 
             cb = {"setStatus": lambda t: self._set_status(t)}
-            self._set_status("Sprawdzanie plików gry…")
+            self._set_status("Checking game files…")
             mll.install.install_minecraft_version(version, str(game_dir), callback=cb)
 
             fabric_id = next((v["id"] for v in mll.utils.get_installed_versions(str(game_dir))
                               if v["id"].startswith("fabric-loader-") and v["id"].endswith("-" + version)), None)
             if not fabric_id:
-                self._set_status("Instalacja Fabric…")
+                self._set_status("Installing Fabric…")
                 java = None
                 try:
                     vjson = json.loads((game_dir / "versions" / version / f"{version}.json").read_text(encoding="utf-8"))
@@ -817,26 +817,27 @@ class Loader(ctk.CTk if ctk else object):
             bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "client-mods" / MOD_JAR
             if version == "1.21.4":
                 if not bundled.exists():
-                    raise RuntimeError("Brak wbudowanego pliku moda Orange Client w loaderze.")
-                shutil.copy2(bundled, mods / MOD_JAR)
+                    raise RuntimeError("The bundled Orange Client mod file is missing from the loader.")
+                client_mod_path = mods / MOD_JAR
+                shutil.copy2(bundled, client_mod_path)
             else:
-                self._set_status("Fabric dla tej wersji zostanie uruchomiony bez Orange Client — mod wymaga osobnego portu.")
+                self._set_status("Fabric will launch without Orange Client for this version; the mod needs a separate port.")
             if not any(p.name.startswith("fabric-api") for p in mods.glob("*.jar")):
-                self._set_status("Pobieranie Fabric API…")
+                self._set_status("Downloading Fabric API…")
                 self._download_fabric_api(version, mods)
 
-            self._set_status("Uruchamianie gry…")
+            self._set_status("Launching game…")
             command = mll.command.get_minecraft_command(fabric_id, str(game_dir), options)
             if os.name == "nt" and command and command[0].lower().endswith("java.exe"):
                 javaw = command[0][:-8] + "javaw.exe"
                 if os.path.exists(javaw):
                     command[0] = javaw
             subprocess.Popen(command, cwd=str(game_dir))
-            self._set_status("Gra uruchomiona. Licencja jest sprawdzana po starcie klienta.")
+            self._set_status("Game launched. The license will be checked after startup.")
         except Exception as exc:
             error = humanize_login_error(exc)
-            self.ui(lambda: messagebox.showerror("Nie udało się uruchomić", error))
-            self._set_status("Uruchomienie nie powiodło się.")
+            self.ui(lambda: messagebox.showerror("Could not launch", error))
+            self._set_status("Launch failed.")
         finally:
             self.ui(lambda: (setattr(self, "_busy", False), self.play_btn.configure(state="normal", text="▶  GRAJ")))
 
