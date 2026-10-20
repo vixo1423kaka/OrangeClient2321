@@ -1,5 +1,6 @@
 package com.example.orangeclient.module;
 
+import com.example.orangeclient.gui.ClickGui;
 import com.example.orangeclient.module.render.GuiModule;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.InputUtil;
@@ -12,7 +13,8 @@ public final class Keybinds {
     public static void poll(MinecraftClient mc) {
         if (mc.getWindow() == null) return;
         long handle = mc.getWindow().getHandle();
-        boolean noScreen = mc.currentScreen == null;   // w czacie / GUI klawisze nie odpalaja modulow
+        // Bindy dzialaja w ekwipunku i innych ekranach, ale nie podczas obslugi menu Orange Client.
+        boolean noScreen = !(mc.currentScreen instanceof ClickGui);
 
         for (Module m : ModuleManager.all()) {
             InputUtil.Key key = m.getBind();
