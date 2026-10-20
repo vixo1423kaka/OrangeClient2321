@@ -197,8 +197,13 @@ public class ClickGui extends Screen {
     private static final float CLICK_VOLUME = 0.8f;
 
     private void playClick() {
-        if (client == null) return;
-        client.getSoundManager().play(PositionedSoundInstance.master(CLICK_SOUND, 1.0f, CLICK_VOLUME));
+        playToggleSound(client);
+    }
+
+    /** Ten sam dzwiek GUI, uzywany rowniez przy powiadomieniach o zmianie stanu modulu. */
+    public static void playToggleSound(net.minecraft.client.MinecraftClient mc) {
+        if (mc == null) return;
+        mc.getSoundManager().play(PositionedSoundInstance.master(CLICK_SOUND, 1.0f, CLICK_VOLUME));
     }
 
     private MutableText fnt(String s) { return fnt(Text.literal(s)); }
