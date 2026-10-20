@@ -330,7 +330,7 @@ class Loader(ctk.CTk if ctk else object):
         dock.pack(side="bottom", fill="x", padx=2, pady=2)
         inner = ctk.CTkFrame(dock, fg_color="transparent")
         inner.pack(fill="x", padx=24, pady=12)
-        self.play_btn = ctk.CTkButton(inner, text="▶  GRAJ", width=190, height=48, corner_radius=14,
+        self.play_btn = ctk.CTkButton(inner, text="▶  PLAY", width=190, height=48, corner_radius=14,
                                       font=("Segoe UI", 15, "bold"), fg_color=ORANGE, hover_color=ORANGE_H,
                                       text_color="#101116", command=self.play)
         self.play_btn.pack(side="right")
@@ -832,14 +832,24 @@ class Loader(ctk.CTk if ctk else object):
                 javaw = command[0][:-8] + "javaw.exe"
                 if os.path.exists(javaw):
                     command[0] = javaw
-            subprocess.Popen(command, cwd=str(game_dir))
+            game_process = subprocess.Popen(command, cwd=str(game_dir))
+            if version == "1.21.4":
+                def _remove_client_mod_when_game_exits():
+                    try:
+                        game_process.wait()
+                    finally:
+                        try:
+                            client_mod_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                threading.Thread(target=_remove_client_mod_when_game_exits, daemon=True).start()
             self._set_status("Game launched. The license will be checked after startup.")
         except Exception as exc:
             error = humanize_login_error(exc)
             self.ui(lambda: messagebox.showerror("Could not launch", error))
             self._set_status("Launch failed.")
         finally:
-            self.ui(lambda: (setattr(self, "_busy", False), self.play_btn.configure(state="normal", text="▶  GRAJ")))
+            self.ui(lambda: (setattr(self, "_busy", False), self.play_btn.configure(state="normal", text="▶  PLAY")))
 
     @staticmethod
     def _download_fabric_api(version, mods):
