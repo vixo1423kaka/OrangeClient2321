@@ -5,6 +5,7 @@ import com.example.orangeclient.util.UiFont;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Util;
@@ -45,6 +46,12 @@ public final class Notifications {
         n.born = Util.getMeasuringTimeMs();
         LIST.add(n);
         while (LIST.size() > MAX) LIST.remove(0);
+
+        // Krotki sygnal przy nowym powiadomieniu; bez dzwieku, gdy gracz nie jest jeszcze zaladowany.
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player != null) {
+            mc.player.playSound(SoundEvents.BLOCK_NOTE_BLOCK_PLING, 0.65F, on ? 1.25F : 0.9F);
+        }
     }
 
     private static MutableText font(Text t) { return UiFont.apply(t); }
