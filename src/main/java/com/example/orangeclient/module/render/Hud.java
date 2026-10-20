@@ -64,8 +64,9 @@ public class Hud extends Module {
     // ------------------------------------------------------------------ powiadomienia (czytane przez Notifications)
 
     private static Hud active() {
-        Hud h = ModuleManager.get(Hud.class);
-        return h != null && h.isEnabled() ? h : null;
+        // Pozycje i opcje powiadomien musza byc czytane z konfiguracji nawet,
+        // gdy sam modul HUD jest wylaczony (np. podczas ustawiania pozycji).
+        return ModuleManager.get(Hud.class);
     }
 
     public static boolean notifVisible() { Hud h = active(); return h == null || h.notifs.get(); }
