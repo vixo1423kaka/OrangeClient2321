@@ -3,6 +3,7 @@ package com.example.orangeclient.module;
 import com.example.orangeclient.gui.ClickGui;
 import com.example.orangeclient.module.render.GuiModule;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.ChatScreen;
 import net.minecraft.client.util.InputUtil;
 import org.lwjgl.glfw.GLFW;
 
@@ -13,8 +14,9 @@ public final class Keybinds {
     public static void poll(MinecraftClient mc) {
         if (mc.getWindow() == null) return;
         long handle = mc.getWindow().getHandle();
-        // Bindy dzialaja w ekwipunku i innych ekranach, ale nie podczas obslugi menu Orange Client.
-        boolean noScreen = !(mc.currentScreen instanceof ClickGui);
+        // Bindy dzialaja w ekwipunku i innych ekranach, ale nie podczas menu klienta ani pisania na chacie.
+        boolean noScreen = !(mc.currentScreen instanceof ClickGui)
+                && !(mc.currentScreen instanceof ChatScreen);
 
         for (Module m : ModuleManager.all()) {
             InputUtil.Key key = m.getBind();
