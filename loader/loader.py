@@ -331,9 +331,9 @@ class Loader(ctk.CTk if ctk else object):
         """Orange particles drift behind the pointer."""
         import random
         self._particles = []
-        self._particle_canvas = tk.Canvas(self, bg=BG, highlightthickness=0, bd=0)
+        self._particle_canvas = tk.Canvas(self.shell, bg=BG, highlightthickness=0, bd=0)
         self._particle_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
-        self._particle_canvas.lower()
+        tk.Misc.lower(self._particle_canvas)
         self.bind("<Motion>", self._spawn_cursor_particle, add="+")
         self._animate_cursor_particles()
 
