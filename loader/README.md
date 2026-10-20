@@ -7,6 +7,10 @@ Po zbudowaniu workflow artefakt znajduje się w GitHub Actions jako `OrangeClien
 Aby zbudować lokalnie w Windows: uruchom `gradlew.bat build` w katalogu głównym repozytorium, a następnie `loader\\build.bat`.
 Gotowy plik będzie w `loader\\dist\\OrangeClientLoader.exe`.
 
+## Wygląd
+- Autorskie menu główne Minecrafta w czarno-pomarańczowej stylistyce, z unoszącymi się drobinami, animowanymi przyciskami, pulsującą poświatą i obracającą się pomarańczą.
+- Launcher Windows ma dedykowaną ikonę pomarańczy generowaną podczas budowania.
+
 ## Funkcje
 - Osobna instancja gry dla każdej wersji: `%APPDATA%/OrangeClientLoader/instances/<wersja>`.
 - Wybór Minecraft Java 1.21.4–1.21.11; instalator konfiguruje Fabric i pobiera pasujące Fabric API.
