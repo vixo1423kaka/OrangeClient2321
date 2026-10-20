@@ -1,3 +1,4 @@
 customtkinter>=5.2.2
 minecraft-launcher-lib>=7.1
 pyinstaller>=6.0
+Pillow>=10.0
