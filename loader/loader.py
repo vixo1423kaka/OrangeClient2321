@@ -41,7 +41,8 @@ DATA_DIR = APPDATA / "OrangeClientLoader"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 INSTANCES = DATA_DIR / "instances"
 MOD_JAR = "orange-client-0.1.0.jar"
-SUPPORTED_VERSIONS = ["1.21.4"]   # wersje, dla których zbudowany jest mod
+SUPPORTED_VERSIONS = [f"1.21.{n}" for n in range(4, 12)]
+# Orange Client JAR w repo jest obecnie kompilowany dla 1.21.4; inne wersje wymagają portu moda.
 # Client ID własnej aplikacji Azure (patrz README). Wbudowywany przy buildzie (workflow generuje
 # _build_config.py ze zmiennej repo AZURE_CLIENT_ID), więc użytkownik niczego nie wpisuje.
 # Awaryjnie można wpisać go tutaj na stałe, nadpisać zmienną środowiskową ORANGE_AZURE_CLIENT_ID
@@ -264,7 +265,7 @@ class Loader(ctk.CTk if ctk else object):
         ctk.CTkLabel(side, text="ORANGE", font=("Segoe UI", 20, "bold"), text_color=ORANGE).pack(anchor="w", padx=20, pady=(26, 0))
         ctk.CTkLabel(side, text="CLIENT", font=("Segoe UI", 11, "bold"), text_color=MUTED).pack(anchor="w", padx=20, pady=(0, 28))
         self.nav = {}
-        for key, label, cmd in (("play", "Graj", self._show_play), ("settings", "Ustawienia", self._show_settings)):
+        for key, label, cmd in (("play", "Graj", self._show_play), ("mods", "Mody", self._show_mods), ("settings", "Ustawienia", self._show_settings)):
             b = ctk.CTkButton(side, text=label, anchor="w", height=38, corner_radius=8,
                               fg_color="transparent", hover_color="#1b2230", text_color=MUTED,
                               font=("Segoe UI", 13), command=cmd)
@@ -348,6 +349,164 @@ class Loader(ctk.CTk if ctk else object):
 
     def _toggle_key(self):
         self.key_entry.configure(show="" if self.show_key.get() else "•")
+
+
+    def _show_mods(self):
+        self._set_nav("mods")
+        self._clear()
+        ctk.CTkLabel(self.page, text="Mody", font=("Segoe UI", 26, "bold"), text_color=TEXT).pack(anchor="w", pady=(0, 4))
+        ctk.CTkLabel(self.page, text="Wyszukuj i instaluj mody Fabric z Modrinth do wybranej instancji.",
+                     font=("Segoe UI", 11), text_color=MUTED).pack(anchor="w", pady=(0, 12))
+        row = ctk.CTkFrame(self.page, fg_color="transparent")
+        row.pack(fill="x", pady=(0, 10))
+        self.mod_query = tk.StringVar()
+        entry = ctk.CTkEntry(row, textvariable=self.mod_query, height=38, placeholder_text="Szukaj modów (np. Sodium, Lithium)…",
+                             border_color=BORDER)
+        entry.pack(side="left", fill="x", expand=True)
+        entry.bind("<Return>", lambda _e: self._search_mods())
+        ctk.CTkButton(row, text="Szukaj", width=95, height=38, fg_color=ORANGE, hover_color=ORANGE_H,
+                      text_color="#101116", command=self._search_mods).pack(side="left", padx=(8, 0))
+        ctk.CTkLabel(self.page, text="Zainstalowane mody — wersja " + self._selected_version(),
+                     font=("Segoe UI", 13, "bold"), text_color=TEXT).pack(anchor="w", pady=(0, 6))
+        self.installed_frame = ctk.CTkScrollableFrame(self.page, fg_color=PANEL, corner_radius=10,
+                                                       border_width=1, border_color=BORDER, height=120)
+        self.installed_frame.pack(fill="x", pady=(0, 12))
+        self._refresh_installed_mods()
+        ctk.CTkLabel(self.page, text="Wyniki Modrinth", font=("Segoe UI", 13, "bold"),
+                     text_color=TEXT).pack(anchor="w", pady=(0, 6))
+        self.mod_results = ctk.CTkScrollableFrame(self.page, fg_color=BG, corner_radius=10, height=220)
+        self.mod_results.pack(fill="both", expand=True)
+        ctk.CTkLabel(self.mod_results, text="Wpisz nazwę moda i kliknij Szukaj.",
+                     text_color=MUTED, font=("Segoe UI", 11)).pack(anchor="w", padx=10, pady=12)
+
+    def _selected_version(self):
+        if hasattr(self, "version_box") and self.version_box.winfo_exists():
+            try:
+                return self.version_box.get().strip()
+            except Exception:
+                pass
+        return self.settings.get("version", SUPPORTED_VERSIONS[0])
+
+    def _modrinth_json(self, url):
+        req = urllib.request.Request(url, headers={"User-Agent": "OrangeClientLoader/1.2 (OrangeClient2321)"})
+        with urllib.request.urlopen(req, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def _search_mods(self):
+        query = self.mod_query.get().strip()
+        if not query:
+            return
+        for widget in self.mod_results.winfo_children():
+            widget.destroy()
+        ctk.CTkLabel(self.mod_results, text="Szukam w Modrinth…", text_color=MUTED).pack(anchor="w", padx=10, pady=10)
+        threading.Thread(target=self._search_mods_worker, args=(query, self._selected_version()), daemon=True).start()
+
+    def _search_mods_worker(self, query, version):
+        try:
+            facets = json.dumps([["project_type:mod"], ["categories:fabric"]], separators=(",", ":"))
+            url = "https://api.modrinth.com/v2/search?" + urllib.parse.urlencode(
+                {"query": query, "facets": facets, "limit": 15, "index": "relevance"})
+            results = self._modrinth_json(url).get("hits", [])
+            self.ui(lambda: self._render_mod_results(results, version))
+        except Exception as exc:
+            msg = str(exc)
+            self.ui(lambda: self._show_mod_search_error(msg))
+
+    def _show_mod_search_error(self, message):
+        if not hasattr(self, "mod_results") or not self.mod_results.winfo_exists():
+            return
+        for widget in self.mod_results.winfo_children():
+            widget.destroy()
+        ctk.CTkLabel(self.mod_results, text="Nie udało się wyszukać modów: " + message,
+                     text_color=RED, wraplength=500).pack(anchor="w", padx=10, pady=10)
+
+    def _render_mod_results(self, results, version):
+        if not hasattr(self, "mod_results") or not self.mod_results.winfo_exists():
+            return
+        for widget in self.mod_results.winfo_children():
+            widget.destroy()
+        if not results:
+            ctk.CTkLabel(self.mod_results, text="Brak wyników.", text_color=MUTED).pack(anchor="w", padx=10, pady=10)
+            return
+        for item in results:
+            card = ctk.CTkFrame(self.mod_results, fg_color=PANEL, corner_radius=8)
+            card.pack(fill="x", padx=3, pady=4)
+            details = ctk.CTkFrame(card, fg_color="transparent")
+            details.pack(side="left", fill="x", expand=True, padx=10, pady=8)
+            ctk.CTkLabel(details, text=item.get("title", item.get("slug", "Mod")),
+                         font=("Segoe UI", 12, "bold"), text_color=TEXT).pack(anchor="w")
+            desc = (item.get("description") or "").replace("\\n", " ")
+            ctk.CTkLabel(details, text=desc[:150], text_color=MUTED, font=("Segoe UI", 10),
+                         wraplength=340, justify="left").pack(anchor="w")
+            ctk.CTkButton(card, text="Zainstaluj", width=100, height=32,
+                          fg_color=ORANGE, hover_color=ORANGE_H, text_color="#101116",
+                          command=lambda mod=item, ver=version: self._install_mod_clicked(mod, ver)).pack(side="right", padx=10, pady=8)
+
+    def _install_mod_clicked(self, item, version):
+        if self._busy:
+            messagebox.showinfo("Instalacja", "Poczekaj, aż zakończy się uruchamianie gry.")
+            return
+        threading.Thread(target=self._install_mod_worker, args=(item, version), daemon=True).start()
+
+    def _install_mod_worker(self, item, version):
+        try:
+            self._set_status("Pobieranie moda " + item.get("title", item.get("slug", "")) + "…")
+            params = urllib.parse.urlencode({
+                "game_versions": json.dumps([version]),
+                "loaders": json.dumps(["fabric"]),
+            })
+            versions = self._modrinth_json("https://api.modrinth.com/v2/project/" +
+                                           urllib.parse.quote(item["project_id"], safe="") + "/version?" + params)
+            compatible = [v for v in versions if v.get("version_type") == "release"] or versions
+            if not compatible:
+                raise RuntimeError("Ten mod nie ma wydania dla Minecraft " + version + " i Fabric.")
+            files = compatible[0].get("files", [])
+            chosen = next((f for f in files if f.get("primary")), files[0] if files else None)
+            if not chosen or not chosen.get("url") or not chosen.get("filename", "").lower().endswith(".jar"):
+                raise RuntimeError("Modrinth nie zwrócił pliku JAR dla tej wersji.")
+            mods_dir = INSTANCES / version / "mods"
+            mods_dir.mkdir(parents=True, exist_ok=True)
+            target = mods_dir / Path(chosen["filename"]).name
+            request = urllib.request.Request(chosen["url"], headers={"User-Agent": "OrangeClientLoader/1.2"})
+            with urllib.request.urlopen(request, timeout=60) as response, target.open("wb") as output:
+                shutil.copyfileobj(response, output)
+            self._set_status("Zainstalowano: " + target.name)
+            self.ui(lambda: self._refresh_installed_mods())
+        except Exception as exc:
+            msg = str(exc)
+            self.ui(lambda: messagebox.showerror("Nie udało się zainstalować moda", msg))
+            self._set_status("Instalacja moda nie powiodła się.")
+
+    def _refresh_installed_mods(self):
+        if not hasattr(self, "installed_frame") or not self.installed_frame.winfo_exists():
+            return
+        for widget in self.installed_frame.winfo_children():
+            widget.destroy()
+        mods_dir = INSTANCES / self._selected_version() / "mods"
+        files = sorted(mods_dir.glob("*.jar")) if mods_dir.exists() else []
+        if not files:
+            ctk.CTkLabel(self.installed_frame, text="Brak dodatkowych modów w tej instancji.",
+                         text_color=MUTED, font=("Segoe UI", 11)).pack(anchor="w", padx=10, pady=8)
+            return
+        for file in files:
+            row = ctk.CTkFrame(self.installed_frame, fg_color="transparent")
+            row.pack(fill="x", padx=4, pady=2)
+            ctk.CTkLabel(row, text=file.name, text_color=TEXT, font=("Segoe UI", 11),
+                         anchor="w").pack(side="left", fill="x", expand=True, padx=6, pady=4)
+            protected = file.name.lower().startswith(("orange-client", "fabric-api"))
+            if protected:
+                ctk.CTkLabel(row, text="Wymagany", text_color=MUTED, font=("Segoe UI", 10)).pack(side="right", padx=8)
+            else:
+                ctk.CTkButton(row, text="Usuń", width=60, height=28, fg_color="#2b3446",
+                              hover_color="#38445b", command=lambda p=file: self._remove_mod(p)).pack(side="right", padx=4)
+
+    def _remove_mod(self, path):
+        try:
+            path.unlink(missing_ok=True)
+            self._refresh_installed_mods()
+            self.status.configure(text="Usunięto mod: " + path.name)
+        except OSError as exc:
+            messagebox.showerror("Nie udało się usunąć moda", str(exc))
 
     def _show_settings(self):
         self._set_nav("settings")
@@ -553,9 +712,12 @@ class Loader(ctk.CTk if ctk else object):
             mods = game_dir / "mods"
             mods.mkdir(exist_ok=True)
             bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "client-mods" / MOD_JAR
-            if not bundled.exists():
-                raise RuntimeError("Brak wbudowanego pliku moda Orange Client w loaderze.")
-            shutil.copy2(bundled, mods / MOD_JAR)
+            if version == "1.21.4":
+                if not bundled.exists():
+                    raise RuntimeError("Brak wbudowanego pliku moda Orange Client w loaderze.")
+                shutil.copy2(bundled, mods / MOD_JAR)
+            else:
+                self._set_status("Fabric dla tej wersji zostanie uruchomiony bez Orange Client — mod wymaga osobnego portu.")
             if not any(p.name.startswith("fabric-api") for p in mods.glob("*.jar")):
                 self._set_status("Pobieranie Fabric API…")
                 self._download_fabric_api(version, mods)
