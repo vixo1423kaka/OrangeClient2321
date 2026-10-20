@@ -311,7 +311,8 @@ class Loader(ctk.CTk if ctk else object):
 
         c = self._card("WERSJA")
         self.version_box = ctk.CTkComboBox(c, values=SUPPORTED_VERSIONS, state="readonly", height=36,
-                                           border_color=BORDER, button_color="#2b3446")
+                                           border_color=BORDER, button_color="#2b3446",
+                                           command=self._on_version_changed)
         self.version_box.set(self.settings.get("version", SUPPORTED_VERSIONS[0]) if self.settings.get("version") in SUPPORTED_VERSIONS else SUPPORTED_VERSIONS[0])
         self.version_box.pack(fill="x", padx=16, pady=(0, 14))
 
@@ -346,6 +347,10 @@ class Loader(ctk.CTk if ctk else object):
         self.key_entry.pack(side="left", fill="x", expand=True)
         self.show_key = ctk.CTkCheckBox(row, text="Pokaż", width=70, command=self._toggle_key)
         self.show_key.pack(side="left", padx=(12, 0))
+
+    def _on_version_changed(self, value):
+        self.settings["version"] = value
+        self._persist()
 
     def _toggle_key(self):
         self.key_entry.configure(show="" if self.show_key.get() else "•")
