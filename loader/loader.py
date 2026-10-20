@@ -150,9 +150,10 @@ class Loader(ctk.CTk if ctk else object):
             labels = [str(DEFAULT_DIR)]
             self.game_dirs = [("Domyślny katalog Minecraft", DEFAULT_DIR)]
         self.install_box = ctk.CTkComboBox(install_row, values=labels, command=self.on_install,
-                                           height=40, corner_radius=9, state="readonly")
+                                           height=40, corner_radius=9, state="disabled")
         self.install_box.pack(side="left", fill="x", expand=True)
         self.install_box.set(labels[0])
+        ctk.CTkLabel(install_row, text="Loader sam wykrywa instalacje — folderu nie wybierasz ręcznie.", text_color="#7f8ba3", font=("Segoe UI", 10)).pack(anchor="w", pady=(4, 0))
         ctk.CTkLabel(install_row, text="Wykryte automatycznie", text_color="#7f8ba3", font=("Segoe UI", 10)).pack(anchor="w", pady=(4, 0))
 
         row = ctk.CTkFrame(main, fg_color="transparent")
