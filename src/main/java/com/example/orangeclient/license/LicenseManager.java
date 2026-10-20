@@ -14,6 +14,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.concurrent.CompletableFuture;
 
 public final class LicenseManager {
@@ -26,6 +32,8 @@ public final class LicenseManager {
 
     private static volatile boolean valid = false;
     private static volatile boolean checking = false;
+    private static volatile long expiresAtMillis = -1L;
+    private static volatile long serverDaysRemaining = -1L;
     private static String savedKey = "";
 
     private LicenseManager() { }
@@ -33,6 +41,62 @@ public final class LicenseManager {
     public static boolean isValid() { return valid; }
     public static boolean isChecking() { return checking; }
     public static String getSavedKey() { return savedKey; }
+
+    /** Pozostale dni odczytane z odpowiedzi serwera licencji. -1 oznacza brak danych o terminie. */
+    public static long getDaysRemaining() {
+        long expiry = expiresAtMillis;
+        if (expiry >= 0L) {
+            long remaining = expiry - System.currentTimeMillis();
+            if (remaining <= 0L) return 0L;
+            return (remaining + 86_400_000L - 1L) / 86_400_000L;
+        }
+        return serverDaysRemaining;
+    }
+
+    private static void readExpiry(JsonObject response) {
+        expiresAtMillis = -1L;
+        serverDaysRemaining = -1L;
+
+        String[] dayFields = {"days_left", "daysRemaining", "remaining_days", "days_remaining"};
+        for (String field : dayFields) {
+            if (response.has(field) && response.get(field).isJsonPrimitive()) {
+                try {
+                    long days = response.get(field).getAsLong();
+                    if (days >= 0L) {
+                        serverDaysRemaining = days;
+                        return;
+                    }
+                } catch (Exception ignored) { }
+            }
+        }
+
+        String[] expiryFields = {"expires_at", "expiresAt", "expiry", "expires", "expiration", "expiration_date", "expiry_date"};
+        for (String field : expiryFields) {
+            if (!response.has(field) || response.get(field).isJsonNull()) continue;
+            try {
+                var value = response.get(field).getAsString().trim();
+                if (value.isEmpty()) continue;
+                try {
+                    long numeric = Long.parseLong(value);
+                    expiresAtMillis = numeric < 10_000_000_000L ? numeric * 1000L : numeric;
+                    return;
+                } catch (NumberFormatException ignored) { }
+                try {
+                    expiresAtMillis = Instant.parse(value).toEpochMilli();
+                    return;
+                } catch (DateTimeParseException ignored) { }
+                try {
+                    expiresAtMillis = OffsetDateTime.parse(value).toInstant().toEpochMilli();
+                    return;
+                } catch (DateTimeParseException ignored) { }
+                try {
+                    expiresAtMillis = LocalDate.parse(value).atTime(LocalTime.MAX)
+                            .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+                    return;
+                } catch (DateTimeParseException ignored) { }
+            } catch (Exception ignored) { }
+        }
+    }
 
     /** Wywolaj raz przy starcie (OrangeClient.onInitializeClient). */
     public static void init() {
@@ -66,10 +130,13 @@ public final class LicenseManager {
                         JsonObject o = GSON.fromJson(res.body(), JsonObject.class);
                         if (o.get("valid").getAsBoolean()) {
                             valid = true;
+                            readExpiry(o);
                             save(k);
                             return (String) null;
                         }
                         valid = false;
+                        expiresAtMillis = -1L;
+                        serverDaysRemaining = -1L;
                         return o.has("message") ? o.get("message").getAsString() : "Nieprawidlowy klucz";
                     } catch (Exception e) {
                         valid = false;
@@ -79,6 +146,8 @@ public final class LicenseManager {
                 .exceptionally(e -> {
                     checking = false;
                     valid = false;
+                    expiresAtMillis = -1L;
+                    serverDaysRemaining = -1L;
                     return "Brak polaczenia z serwerem licencji";
                 });
     }
