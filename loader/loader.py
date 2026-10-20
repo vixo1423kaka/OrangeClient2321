@@ -207,8 +207,14 @@ class Loader(ctk.CTk if ctk else object):
         self._maximized = False
         self._normal_geometry = "920x640"
         self._drag_origin = None
-        # Frameless macOS-style window. Keep the custom titlebar controls and drag support.
-        self.configure(fg_color=BG)
+        # Frameless macOS-style window with a color-key background for genuinely rounded outer corners.
+        self._corner_key = "#ff00ff"
+        self.configure(fg_color=self._corner_key)
+        if os.name == "nt":
+            try:
+                self.attributes("-transparentcolor", self._corner_key)
+            except tk.TclError:
+                pass
         try:
             self.overrideredirect(True)
         except tk.TclError:
@@ -276,9 +282,9 @@ class Loader(ctk.CTk if ctk else object):
     # ---- UI ---------------------------------------------------------------------------------
     def _build_ui(self):
         # Rounded application shell sits over a transparent color-key background.
-        self.shell = ctk.CTkFrame(self, fg_color=BG, corner_radius=24,
+        self.shell = ctk.CTkFrame(self, fg_color=BG, corner_radius=36,
                                   border_width=1, border_color=BORDER)
-        self.shell.pack(fill="both", expand=True, padx=2, pady=2)
+        self.shell.pack(fill="both", expand=True, padx=8, pady=8)
 
         # Clean header; native minimize/maximize/close controls belong to Windows.
         titlebar = ctk.CTkFrame(self.shell, fg_color=SIDE, corner_radius=12, height=42)
