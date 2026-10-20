@@ -3,7 +3,7 @@ name: Build Windows Loader
 on:
   workflow_dispatch:
   push:
-    branches: [loader-prototype]
+    branches: [loader-prototype, launcher-modrinth-style]
     paths:
       - "loader/**"
       - "src/**"
