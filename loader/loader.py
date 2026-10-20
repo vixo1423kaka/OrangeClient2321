@@ -344,17 +344,21 @@ class Loader(ctk.CTk if ctk else object):
         self._particle_canvas = tk.Canvas(self.shell, bg=BG, highlightthickness=0, bd=0)
         self._particle_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
         tk.Misc.lower(self._particle_canvas)
-        self.bind("<Motion>", self._spawn_cursor_particle, add="+")
+        self.bind_all("<Motion>", self._spawn_cursor_particle, add="+")
         self._animate_cursor_particles()
 
     def _spawn_cursor_particle(self, event):
         import random
+        x = event.x_root - self._particle_canvas.winfo_rootx()
+        y = event.y_root - self._particle_canvas.winfo_rooty()
+        if x < 0 or y < 0 or x >= self._particle_canvas.winfo_width() or y >= self._particle_canvas.winfo_height():
+            return
         radius = random.randint(2, 4)
         color = random.choice(["#ff8617", "#ff9d42", "#d85d12"])
-        item = self._particle_canvas.create_oval(event.x-radius, event.y-radius,
-                                                 event.x+radius, event.y+radius,
+        item = self._particle_canvas.create_oval(x-radius, y-radius,
+                                                 x+radius, y+radius,
                                                  fill=color, outline="")
-        self._particles.append([item, event.x, event.y, random.uniform(-1.2, 1.2),
+        self._particles.append([item, x, y, random.uniform(-1.2, 1.2),
                                 random.uniform(0.6, 2.0), 16])
 
     def _animate_cursor_particles(self):
