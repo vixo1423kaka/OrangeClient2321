@@ -5,6 +5,7 @@ Najnowszy EXE: GitHub Actions → `build-loader.yml` → artefakt `OrangeClientL
 
 ## Funkcje
 - Klucz licencji zapamiętywany w `%APPDATA%/OrangeClientLoader/settings.json` (zapis przy każdej zmianie).
+- Wykrywa konta z oficjalnego launchera, Modrinth App, Prism i MultiMC (tylko nick/UUID/e-mail, nigdy tokeny) i pokazuje je na liście kont. Wiele kont do wyboru.
 - Logowanie Microsoft zapamiętywane między uruchomieniami (token odświeżania chroniony DPAPI). Tryb Offline jako alternatywa.
 - Brak migających okien cmd (Java i instalator Fabric działają bez konsoli).
 - Osobny profil gry: `%APPDATA%/OrangeClientLoader/instances/<wersja>`.

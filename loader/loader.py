@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -104,10 +105,54 @@ def save_settings(data: dict) -> None:
         pass
 
 
+
+# --- Wykrywanie kont w innych launcherach (TYLKO nick/UUID/e-mail, nigdy tokeny) -------------
+def detect_external_accounts():
+    found = []
+
+    def add(source, name, uid, hint=""):
+        uid = (uid or "").replace("-", "").lower()
+        if name and re.fullmatch(r"[0-9a-f]{32}", uid) and not any(a["id"] == uid for a in found):
+            found.append({"source": source, "name": name, "id": uid, "hint": hint if "@" in (hint or "") else ""})
+
+    try:  # oficjalny launcher
+        data = json.loads((APPDATA / ".minecraft" / "launcher_accounts.json").read_text(encoding="utf-8"))
+        for acc in (data.get("accounts") or {}).values():
+            prof = acc.get("minecraftProfile") or {}
+            add("Launcher Minecraft", prof.get("name"), prof.get("id"), acc.get("username", ""))
+    except (OSError, ValueError, AttributeError):
+        pass
+    for label, folder in (("Prism", "PrismLauncher"), ("MultiMC", "MultiMC")):
+        try:
+            data = json.loads((APPDATA / folder / "accounts.json").read_text(encoding="utf-8"))
+            for acc in data.get("accounts", []):
+                prof = acc.get("profile") or {}
+                add(label, prof.get("name"), prof.get("id"))
+        except (OSError, ValueError, AttributeError):
+            pass
+    for folder in ("ModrinthApp", "com.modrinth.theseus"):  # Modrinth App (baza SQLite, tylko odczyt)
+        db = APPDATA / folder / "app.db"
+        if not db.is_file():
+            continue
+        try:
+            con = sqlite3.connect(f"file:{db.as_posix()}?mode=ro", uri=True, timeout=2)
+            try:
+                cols = {r[1] for r in con.execute("PRAGMA table_info(minecraft_users)")}
+                if {"uuid", "username"} <= cols:
+                    for uid, name in con.execute("SELECT uuid, username FROM minecraft_users"):
+                        add("Modrinth", name, str(uid))
+            finally:
+                con.close()
+        except (sqlite3.Error, OSError):
+            pass
+    return found
+
 # --- Logowanie Microsoft (własne OAuth, PKCE, przekierowanie na localhost) ----------------
-def microsoft_login(client_id: str, timeout: int = 180) -> dict:
+def microsoft_login(client_id: str, hint: str = "", timeout: int = 180) -> dict:
     """Otwiera przeglądarkę, czeka na kod i zwraca dane konta (id, name, access_token, refresh_token)."""
     url, state, verifier = mll.microsoft_account.get_secure_login_data(client_id, REDIRECT_URI)
+    if hint:
+        url += "&" + urllib.parse.urlencode({"login_hint": hint})
     result = {}
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -156,11 +201,13 @@ class Loader(ctk.CTk if ctk else object):
         self.configure(fg_color=BG)
 
         self.settings = load_settings()
-        self.account = None  # {"id","name","refresh"}
-        s = self.settings
-        if s.get("account", {}).get("refresh"):
-            a = s["account"]
-            self.account = {"id": a.get("id", ""), "name": a.get("name", ""), "refresh": unseal(a["refresh"])}
+        self.accounts = []  # zapisane konta: {"id","name","refresh"}
+        for a in s.get("accounts", []):
+            if a.get("refresh"):
+                self.accounts.append({"id": a.get("id", ""), "name": a.get("name", ""), "refresh": unseal(a["refresh"])})
+        self.active_id = s.get("active_account", "")
+        self.detected = detect_external_accounts()
+        self.choice = None  # aktualnie wybrana pozycja z listy
         self.mode = tk.StringVar(value=s.get("mode", "offline"))
         self.username = tk.StringVar(value=s.get("username", "Player"))
         self.license_key = tk.StringVar(value=s.get("license_key", "") or self._key_from_instances())
@@ -171,7 +218,7 @@ class Loader(ctk.CTk if ctk else object):
         self._build_ui()
         self._show_play()
         self._refresh_account_label()
-        if self.account:
+        if self.accounts:
             threading.Thread(target=self._silent_refresh, daemon=True).start()
 
     # ---- stan -------------------------------------------------------------------------------
@@ -195,11 +242,9 @@ class Loader(ctk.CTk if ctk else object):
         self.settings["license_key"] = self.license_key.get().strip()
         self.settings["username"] = self.username.get().strip()
         self.settings["mode"] = self.mode.get()
-        if self.account:
-            self.settings["account"] = {"id": self.account["id"], "name": self.account["name"],
-                                        "refresh": seal(self.account["refresh"])}
-        else:
-            self.settings.pop("account", None)
+        self.settings.pop("account", None)
+        self.settings["accounts"] = [{"id": a["id"], "name": a["name"], "refresh": seal(a["refresh"])} for a in self.accounts]
+        self.settings["active_account"] = self.active_id
         save_settings(self.settings)
 
     def ui(self, fn):
@@ -273,11 +318,17 @@ class Loader(ctk.CTk if ctk else object):
         self.account_row.pack(fill="x", padx=16, pady=(10, 14))
         self.offline_entry = ctk.CTkEntry(self.account_row, textvariable=self.username, height=34,
                                           placeholder_text="Nazwa gracza (3-16 znaków)", border_color=BORDER)
-        self.account_label = ctk.CTkLabel(self.account_row, text="", font=("Segoe UI", 12), text_color=TEXT, anchor="w")
-        self.login_btn = ctk.CTkButton(self.account_row, text="Zaloguj przez Microsoft", width=180, height=34,
-                                       fg_color="#2b3446", hover_color="#38445b", command=self._login_clicked)
+        self.account_box = ctk.CTkComboBox(self.account_row, values=[""], state="readonly", height=34,
+                                           border_color=BORDER, button_color="#2b3446",
+                                           command=self._on_account_pick)
+        self.login_btn = ctk.CTkButton(self.account_row, text="Zaloguj", width=90, height=34,
+                                       fg_color=ORANGE, hover_color=ORANGE_H, text_color="#101116",
+                                       command=self._login_clicked)
         self.logout_btn = ctk.CTkButton(self.account_row, text="Wyloguj", width=90, height=34,
                                         fg_color="#2b3446", hover_color="#38445b", command=self._logout)
+        self.more_btn = ctk.CTkButton(self.account_row, text="+ Inne konto", width=110, height=34,
+                                      fg_color="#2b3446", hover_color="#38445b",
+                                      command=lambda: self._login_clicked(other=True))
         self._layout_account_row()
 
         c = self._card("KLUCZ LICENCJI")
@@ -320,71 +371,109 @@ class Loader(ctk.CTk if ctk else object):
         self.status.configure(text="Zapisano Client ID.")
 
     # ---- konto ------------------------------------------------------------------------------
+    @property
+    def account(self):
+        return next((a for a in self.accounts if a["id"] == self.active_id), None)
+
+    def _choices(self):
+        out = [{"label": f"{a['name']}  ✓", "saved": True, "id": a["id"], "hint": ""} for a in self.accounts]
+        saved = {a["id"] for a in self.accounts}
+        for d in self.detected:
+            if d["id"] not in saved:
+                out.append({"label": f"{d['name']}  · {d['source']} (kliknij Zaloguj)", "saved": False,
+                            "id": d["id"], "hint": d["hint"]})
+        return out
+
     def _on_mode(self, value):
         self.mode.set("microsoft" if value == "Microsoft" else "offline")
         self._persist()
         self._layout_account_row()
 
     def _layout_account_row(self):
-        for w in (self.offline_entry, self.account_label, self.login_btn, self.logout_btn):
+        for w in (self.offline_entry, self.account_box, self.login_btn, self.logout_btn, self.more_btn):
             w.pack_forget()
         if self.mode.get() == "offline":
             self.offline_entry.pack(fill="x")
             return
-        if self.account:
-            self.account_label.configure(text=f"● Zalogowano jako {self.account['name']}", text_color=GREEN)
-            self.account_label.pack(side="left", fill="x", expand=True)
-            self.logout_btn.pack(side="right")
+        choices = self._choices()
+        if not choices:
+            self.choice = None
+            self.account_box.configure(values=["Brak kont – zaloguj się"])
+            self.account_box.set("Brak kont – zaloguj się")
         else:
-            self.account_label.configure(text="Nie zalogowano", text_color=MUTED)
-            self.account_label.pack(side="left", fill="x", expand=True)
-            self.login_btn.pack(side="right")
+            current = next((c for c in choices if c["id"] == self.active_id), choices[0])
+            self.choice = current
+            self.account_box.configure(values=[c["label"] for c in choices])
+            self.account_box.set(current["label"])
+            if current["saved"]:
+                self.active_id = current["id"]
+        self.account_box.pack(side="left", fill="x", expand=True)
+        self.more_btn.pack(side="right", padx=(8, 0))
+        if self.choice and self.choice["saved"]:
+            self.logout_btn.pack(side="right", padx=(8, 0))
+        else:
+            self.login_btn.pack(side="right", padx=(8, 0))
+
+    def _on_account_pick(self, label):
+        for c in self._choices():
+            if c["label"] == label:
+                self.choice = c
+                if c["saved"]:
+                    self.active_id = c["id"]
+                    self._persist()
+        self._layout_account_row()
 
     def _refresh_account_label(self):
         if hasattr(self, "account_row") and self.account_row.winfo_exists():
             self._layout_account_row()
 
-    def _login_clicked(self):
+    def _login_clicked(self, other=False):
         cid = self._client_id()
         if not cid:
             messagebox.showinfo("Logowanie Microsoft",
                                 "Brak Azure Client ID. Wklej go w Ustawieniach (instrukcja w README loadera).")
             self._show_settings()
             return
-        self.login_btn.configure(state="disabled", text="Czekam na przeglądarkę…")
+        hint = "" if (other or not self.choice) else self.choice.get("hint", "")
+        self.login_btn.configure(state="disabled")
+        self.more_btn.configure(state="disabled")
         self.status.configure(text="Dokończ logowanie w przeglądarce.")
-        threading.Thread(target=self._login_worker, args=(cid,), daemon=True).start()
+        threading.Thread(target=self._login_worker, args=(cid, hint), daemon=True).start()
 
-    def _login_worker(self, cid):
+    def _login_worker(self, cid, hint):
         try:
-            data = microsoft_login(cid)
-            self.account = {"id": data["id"], "name": data["name"], "refresh": data["refresh_token"]}
+            data = microsoft_login(cid, hint)
+            entry = {"id": data["id"].replace("-", "").lower(), "name": data["name"], "refresh": data["refresh_token"]}
+            self.accounts = [a for a in self.accounts if a["id"] != entry["id"]] + [entry]
+            self.active_id = entry["id"]
             self._persist()
-            self.ui(lambda: self.status.configure(text=f"Zalogowano jako {data['name']}."))
+            self._set_status(f"Zalogowano jako {data['name']}.")
         except Exception as exc:
             msg = humanize_login_error(exc)
             self.ui(lambda: messagebox.showerror("Logowanie nie powiodło się", msg))
         finally:
-            self.ui(lambda: (self.login_btn.configure(state="normal", text="Zaloguj przez Microsoft"),
+            self.ui(lambda: (self.login_btn.configure(state="normal"), self.more_btn.configure(state="normal"),
                              self._refresh_account_label()))
 
     def _logout(self):
-        self.account = None
+        self.accounts = [a for a in self.accounts if a["id"] != self.active_id]
+        self.active_id = self.accounts[0]["id"] if self.accounts else ""
         self._persist()
         self._layout_account_row()
         self.status.configure(text="Wylogowano.")
 
     def _silent_refresh(self):
-        """Przy starcie odświeża sesję, żeby było widać, że konto nadal jest zalogowane."""
+        """Przy starcie odświeża zapisane sesje, żeby konta nadal były oznaczone jako zalogowane."""
         cid = self._client_id()
-        if not (cid and self.account):
+        if not cid:
             return
-        try:
-            data = mll.microsoft_account.complete_refresh(cid, None, None, self.account["refresh"])
-            self.account = {"id": data["id"], "name": data["name"], "refresh": data["refresh_token"]}
-            self._persist()
-        except Exception:
-            pass  # zostaje zapamiętane konto; błąd pojawi się dopiero przy grze
+        for acc in list(self.accounts):
+            try:
+                data = mll.microsoft_account.complete_refresh(cid, None, None, acc["refresh"])
+                acc["refresh"], acc["name"] = data["refresh_token"], data["name"]
+            except Exception:
+                pass
+        self._persist()
         self.ui(self._refresh_account_label)
 
     # ---- uruchamianie -----------------------------------------------------------------------
@@ -427,7 +516,8 @@ class Loader(ctk.CTk if ctk else object):
                 if not cid:
                     raise RuntimeError("Brak Azure Client ID (Ustawienia).")
                 data = mll.microsoft_account.complete_refresh(cid, None, None, self.account["refresh"])
-                self.account = {"id": data["id"], "name": data["name"], "refresh": data["refresh_token"]}
+                acc = self.account
+                acc["refresh"], acc["name"] = data["refresh_token"], data["name"]
                 self._persist()
                 options.update({"username": data["name"], "uuid": data["id"], "token": data["access_token"]})
             else:
