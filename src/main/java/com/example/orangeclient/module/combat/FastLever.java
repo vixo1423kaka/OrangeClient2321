@@ -9,6 +9,7 @@ import com.example.orangeclient.setting.NumberSetting;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Items;
@@ -49,7 +50,7 @@ public class FastLever extends Module {
         if (mc.currentScreen != null || Freecam.isActive() || mc.player.isSpectator()
                 || !mc.player.isAlive() || mc.player.isUsingItem()) return;
 
-        PlayerEntity self = mc.player;
+        ClientPlayerEntity self = mc.player;
         PlayerEntity target = findTarget(mc, self);
         if (target == null) return;
 
