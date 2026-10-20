@@ -19,21 +19,36 @@ import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
-/** Automatically places cobwebs in a nearby player's feet space or immediately below them. */
+/**
+ * Stawia pajeczyny w gracza (stopy / glowa).
+ *
+ * Przez sciany: swiat nie raycastuje, tylko sprawdza odleglosc do srodka kliknietego bloku
+ * z tolerancja blockInteractionRange + 1.0. Dlatego:
+ *   - zasieg liczymy do SRODKA podpory (a nie do powierzchni), z ta sama tolerancja,
+ *   - gdy proba sie nie uda (serwer odrzucil), kolejna proba bierze INNA podpore,
+ *   - po kazdej probie sprawdzamy czy web faktycznie wstal (Verify).
+ */
 public class AutoWeb extends Module {
     private final NumberSetting range = add(new NumberSetting("Range", 4.5, 1.0, 6.0, 0.1));
     private final ModeSetting placement = add(new ModeSetting("Placement", "Legs", "Legs", "Head", "Both"));
     private final NumberSetting delay = add(new NumberSetting("Delay", 1, 0, 10, 1));
     private final BoolSetting ignoreFriends = add(new BoolSetting("IgnoreFriends", true));
-    private final BoolSetting throughWalls = add(new BoolSetting("ThroughWalls", false));
+    private final BoolSetting throughWalls = add(new BoolSetting("ThroughWalls", true));
     private final BoolSetting switchBack = add(new BoolSetting("SwitchBack", true));
     private final BoolSetting noLever = add(new BoolSetting("NoLever", false));
-    private BlockPos breakingObstacle;
+    private final BoolSetting verify = add(new BoolSetting("Verify", true));
+    private final BoolSetting wide = add(new BoolSetting("Wide", false));
 
+    private final List<BlockPos> pending = new ArrayList<>();
+    private int pendingTicks;
+    private int supportIndex;
     private int placeCooldown;
+    private BlockPos breakingObstacle;
 
     public AutoWeb() {
         super("AutoWeb", Category.COMBAT);
@@ -43,78 +58,103 @@ public class AutoWeb extends Module {
     protected void onEnable() {
         placeCooldown = 0;
         breakingObstacle = null;
+        pending.clear();
+        supportIndex = 0;
     }
 
     @Override
     public void onTick(MinecraftClient mc) {
+        if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
+
+        // Weryfikacja poprzedniej proby: jesli web nie wstal, nastepnym razem inna podpora.
+        if (!pending.isEmpty() && --pendingTicks <= 0) {
+            boolean failed = false;
+            for (BlockPos p : pending) {
+                if (!mc.world.getBlockState(p).isOf(Blocks.COBWEB)) {
+                    failed = true;
+                    break;
+                }
+            }
+            if (failed && verify.get()) supportIndex++;
+            pending.clear();
+        }
+
         if (placeCooldown > 0) placeCooldown--;
-        if (placeCooldown > 0 || mc.player == null || mc.world == null || mc.interactionManager == null) return;
+        if (placeCooldown > 0 || !pending.isEmpty()) return;
         if (mc.currentScreen != null || Freecam.isActive() || mc.player.isSpectator()
                 || !mc.player.isAlive() || mc.player.isUsingItem()) return;
 
         PlayerEntity player = mc.player;
-        PlayerEntity target = findTarget(mc, player);
-        if (target == null) return;
+        List<PlayerEntity> targets = findTargets(mc, player);
+        if (targets.isEmpty()) return;
 
         PlayerInventory inv = player.getInventory();
         int webSlot = findCobwebSlot(inv);
         if (webSlot == -1) return;
 
-        List<BlockPos> placePositions = findPlacePositions(mc, target.getBlockPos());
-        if (placePositions.isEmpty()) return;
+        double extra = throughWalls.get() ? 1.0 : 0.3;
+        double reach = player.getBlockInteractionRange() + extra;
+        double reachSq = reach * reach;
 
-        // If a redstone control occupies the desired web position, mine it first (one block at a time).
-        if (noLever.get()) {
-            for (BlockPos pos : placePositions) {
-                BlockState state = mc.world.getBlockState(pos);
-                if (!state.isReplaceable() && isRedstoneControl(mc, pos)) {
-                    breakingObstacle = pos.toImmutable();
-                    mc.interactionManager.attackBlock(breakingObstacle, Direction.UP);
+        for (PlayerEntity target : targets) {
+            List<BlockPos> positions = findPlacePositions(mc, target.getBlockPos());
+            if (positions.isEmpty()) continue;
+
+            if (noLever.get()) {
+                BlockPos obstacle = findObstacle(mc, positions);
+                if (obstacle != null) {
+                    breakingObstacle = obstacle;
+                    mc.interactionManager.attackBlock(obstacle, Direction.UP);
                     mc.player.swingHand(Hand.MAIN_HAND);
                     placeCooldown = 1;
                     return;
                 }
             }
             breakingObstacle = null;
-        }
 
-        double maxBlockReach = player.getBlockInteractionRange() + 0.3;
-        double maxBlockReachSq = maxBlockReach * maxBlockReach;
-        List<BlockHitResult> hits = new ArrayList<>();
-        for (BlockPos placePos : placePositions) {
-            BlockHitResult hit = findSupportHit(mc, player, placePos);
-            if (hit == null) continue;
-            if (player.getEyePos().squaredDistanceTo(hit.getPos()) > maxBlockReachSq) continue;
-            hits.add(hit);
-        }
-        if (hits.isEmpty()) return;
-
-        int oldSlot = inv.selectedSlot;
-        inv.selectedSlot = webSlot;
-        try {
-            for (BlockHitResult hit : hits) {
-                mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hit);
+            List<BlockHitResult> hits = new ArrayList<>();
+            for (BlockPos pos : positions) {
+                BlockHitResult hit = pickSupport(mc, player, pos, reachSq);
+                if (hit != null) hits.add(hit);
             }
-        } finally {
-            if (switchBack.get()) inv.selectedSlot = oldSlot;
+            if (hits.isEmpty()) continue;
+
+            int oldSlot = inv.selectedSlot;
+            inv.selectedSlot = webSlot;
+            try {
+                for (BlockHitResult hit : hits) {
+                    mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hit);
+                }
+            } finally {
+                if (switchBack.get()) inv.selectedSlot = oldSlot;
+            }
+
+            if (verify.get()) {
+                pending.clear();
+                for (BlockHitResult hit : hits) {
+                    pending.add(hit.getBlockPos().offset(hit.getSide()).toImmutable());
+                }
+                pendingTicks = 3;
+            }
+            placeCooldown = (int) delay.get();
+            return;
         }
-        placeCooldown = (int) delay.get();
     }
 
-    private PlayerEntity findTarget(MinecraftClient mc, PlayerEntity self) {
-        PlayerEntity best = null;
-        double maxDistance = Math.min(range.get(), self.getBlockInteractionRange() + 0.3);
-        double bestDistance = maxDistance;
+    /** Cele po odleglosci - jeden nieosiagalny gracz nie blokuje reszty. */
+    private List<PlayerEntity> findTargets(MinecraftClient mc, PlayerEntity self) {
+        double extra = throughWalls.get() ? 1.0 : 0.3;
+        double maxDistance = Math.min(range.get(), self.getBlockInteractionRange() + extra);
+        List<PlayerEntity> out = new ArrayList<>();
         for (PlayerEntity candidate : mc.world.getPlayers()) {
             if (candidate == self || !candidate.isAlive() || candidate.isSpectator()) continue;
             if (ignoreFriends.get() && Friends.isFriend(candidate)) continue;
             if (!throughWalls.get() && !self.canSee(candidate)) continue;
-            double distance = self.distanceTo(candidate);
-            if (distance > bestDistance) continue;
-            bestDistance = distance;
-            best = candidate;
+            if (self.distanceTo(candidate) > maxDistance) continue;
+            out.add(candidate);
         }
-        return best;
+        out.sort(Comparator.comparingDouble((PlayerEntity p) -> self.squaredDistanceTo(p)));
+        return out;
     }
 
     private int findCobwebSlot(PlayerInventory inv) {
@@ -125,7 +165,6 @@ public class AutoWeb extends Module {
     }
 
     private List<BlockPos> findPlacePositions(MinecraftClient mc, BlockPos targetPos) {
-        // Player block position is the lower/feet block; the head space is one block above.
         BlockPos legs = targetPos;
         BlockPos head = targetPos.up();
         List<BlockPos> positions = new ArrayList<>(2);
@@ -136,9 +175,17 @@ public class AutoWeb extends Module {
             case "Head" -> {
                 if (canPlaceAt(mc, head)) positions.add(head);
             }
-            case "Both" -> {
+            default -> {
                 if (canPlaceAt(mc, legs)) positions.add(legs);
                 if (canPlaceAt(mc, head)) positions.add(head);
+            }
+        }
+        if (wide.get()) {
+            for (Direction d : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST}) {
+                BlockPos p1 = legs.offset(d);
+                BlockPos p2 = head.offset(d);
+                if (canPlaceAt(mc, p1)) positions.add(p1);
+                if (canPlaceAt(mc, p2)) positions.add(p2);
             }
         }
         return positions;
@@ -150,6 +197,14 @@ public class AutoWeb extends Module {
                 || (noLever.get() && isRedstoneControl(mc, pos));
     }
 
+    private BlockPos findObstacle(MinecraftClient mc, List<BlockPos> positions) {
+        for (BlockPos pos : positions) {
+            BlockState state = mc.world.getBlockState(pos);
+            if (!state.isReplaceable() && isRedstoneControl(mc, pos)) return pos.toImmutable();
+        }
+        return null;
+    }
+
     private boolean isRedstoneControl(MinecraftClient mc, BlockPos pos) {
         String path = Registries.BLOCK.getId(mc.world.getBlockState(pos).getBlock()).getPath();
         return path.equals("lever") || path.endsWith("_button") || path.equals("stone_button")
@@ -158,26 +213,38 @@ public class AutoWeb extends Module {
                 || path.equals("redstone_torch") || path.equals("redstone_wall_torch");
     }
 
-    /** Finds a neighboring solid block to click so vanilla placement fills placePos. */
-    private BlockHitResult findSupportHit(MinecraftClient mc, PlayerEntity player, BlockPos placePos) {
-        BlockHitResult best = null;
-        double bestDistance = Double.MAX_VALUE;
+    /** Podpora rotowana przy kolejnych probach, zeby zla podpora nie zapetlala modulu. */
+    private BlockHitResult pickSupport(MinecraftClient mc, PlayerEntity player, BlockPos placePos, double reachSq) {
+        List<BlockHitResult> supports = findSupportHits(mc, player, placePos, reachSq);
+        if (supports.isEmpty()) return null;
+        return supports.get(supportIndex % supports.size());
+    }
+
+    /**
+     * Podpory dla placePos: najpierw pelne boki (isSideSolidFullSquare), potem reszta, po odleglosci.
+     * Zasieg liczony do SRODKA podpory - dokladnie tak jak waliduje to swiat.
+     */
+    private List<BlockHitResult> findSupportHits(MinecraftClient mc, PlayerEntity player, BlockPos placePos, double reachSq) {
+        List<BlockHitResult> full = new ArrayList<>();
+        List<BlockHitResult> rest = new ArrayList<>();
         Vec3d eye = player.getEyePos();
         for (Direction face : Direction.values()) {
             BlockPos supportPos = placePos.offset(face.getOpposite());
             BlockState support = mc.world.getBlockState(supportPos);
             if (support.isReplaceable() || support.getCollisionShape(mc.world, supportPos).isEmpty()) continue;
+            if (eye.squaredDistanceTo(Vec3d.ofCenter(supportPos)) > reachSq) continue;
 
             Vec3d hitPos = new Vec3d(
                     supportPos.getX() + 0.5 + face.getOffsetX() * 0.5,
                     supportPos.getY() + 0.5 + face.getOffsetY() * 0.5,
                     supportPos.getZ() + 0.5 + face.getOffsetZ() * 0.5);
-            double distance = eye.squaredDistanceTo(hitPos);
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                best = new BlockHitResult(hitPos, face, supportPos, false);
-            }
+            BlockHitResult hit = new BlockHitResult(hitPos, face, supportPos, false);
+            if (support.isSideSolidFullSquare(mc.world, supportPos, face)) full.add(hit);
+            else rest.add(hit);
         }
-        return best;
+        full.sort(Comparator.comparingDouble((BlockHitResult h) -> eye.squaredDistanceTo(h.getPos())));
+        rest.sort(Comparator.comparingDouble((BlockHitResult h) -> eye.squaredDistanceTo(h.getPos())));
+        full.addAll(rest);
+        return full;
     }
 }
