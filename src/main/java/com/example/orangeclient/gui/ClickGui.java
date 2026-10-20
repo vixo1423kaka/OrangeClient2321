@@ -1,6 +1,7 @@
 package com.example.orangeclient.gui;
 
 import com.example.orangeclient.util.UiFont;
+import com.example.orangeclient.license.LicenseManager;
 
 import com.example.orangeclient.friend.Friends;
 import com.example.orangeclient.module.BindMode;
@@ -315,6 +316,13 @@ public class ClickGui extends Screen {
         m.scale(1.2f, 1.2f, 1f);
         UiFont.draw(ctx, textRenderer, fnt(Text.literal("Orange Client").formatted(Formatting.BOLD)), 0, 0, ORANGE);
         m.pop();
+
+        long licenseDays = LicenseManager.getDaysRemaining();
+        String licenseLabel = licenseDays >= 0
+                ? "Licencja: " + licenseDays + (licenseDays == 1 ? " dzien" : " dni")
+                : (LicenseManager.isValid() ? "Licencja aktywna" : "Licencja: --");
+        int licenseColor = licenseDays == 0 ? 0xFFFF6666 : 0xFFE0E5EC;
+        UiFont.draw(ctx, textRenderer, fnt(licenseLabel), px + pw - 142, py + 10, licenseColor);
 
         // --- zakladki na dole (podswietlenie plynnie przesuwa sie miedzy nimi)
         Tab[] tabs = {Tab.MODULES, Tab.CONFIGS, Tab.FRIENDS};   // Waypoints otwiera sie PPM na module Waypoint Manager
