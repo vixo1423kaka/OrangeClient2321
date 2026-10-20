@@ -78,7 +78,7 @@ def available_versions():
         out = []
         for item in manifest.get("versions", []):
             vid = item.get("id", "")
-            if item.get("type") == "release" and re.match(r"^1\.(21|22|23|24)\.", vid):
+            if item.get("type") == "release" and re.match(r"^1\.\d+\.\d+$", vid):
                 nums = tuple(int(x) for x in re.findall(r"\d+", vid))
                 if nums >= (1, 21, 4):
                     out.append(vid)
@@ -99,8 +99,8 @@ class Loader(ctk.CTk if ctk else object):
         self.minsize(800, 600)
         self.configure(fg_color="#0b0d12")
         self.game_dirs = discover_game_dirs()
-        self.current_dir = DEFAULT_DIR
-        self.version_items = []
+        self.current_dir = self.game_dirs[0][1] if self.game_dirs else DEFAULT_DIR
+        self.version_items = available_versions()
         self.mode = ctk.StringVar(value="offline")
         self.username = ctk.StringVar(value="Player")
         self.license_key = ctk.StringVar()
