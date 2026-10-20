@@ -43,10 +43,9 @@ INSTANCES = DATA_DIR / "instances"
 MOD_JAR = "orange-client-0.1.0.jar"
 SUPPORTED_VERSIONS = [f"1.21.{n}" for n in range(4, 12)]
 # Orange Client JAR w repo jest obecnie kompilowany dla 1.21.4; inne wersje wymagają portu moda.
-# Client ID własnej aplikacji Azure (patrz README). Wbudowywany przy buildzie (workflow generuje
-# _build_config.py ze zmiennej repo AZURE_CLIENT_ID), więc użytkownik niczego nie wpisuje.
-# Awaryjnie można wpisać go tutaj na stałe, nadpisać zmienną środowiskową ORANGE_AZURE_CLIENT_ID
-# albo (tylko gdy nic nie jest wbudowane) wpisać w Ustawieniach.
+# Microsoft OAuth jest opcjonalny. Build nie wymaga Client ID: bez niego działa tryb offline.
+# Aby włączyć logowanie Microsoft, ustaw ORANGE_AZURE_CLIENT_ID albo wpisz Client ID
+# własnej aplikacji w Ustawieniach. Można też opcjonalnie dołączyć _build_config.py.
 try:
     from _build_config import AZURE_CLIENT_ID  # type: ignore[import-not-found]
 except ImportError:
