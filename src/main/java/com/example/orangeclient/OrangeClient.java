@@ -3,6 +3,7 @@ package com.example.orangeclient;
 import com.example.orangeclient.friend.Friends;
 import com.example.orangeclient.gui.ClickGui;
 import com.example.orangeclient.gui.Notifications;
+import com.example.orangeclient.gui.OrangeMainMenu;
 import com.example.orangeclient.license.LicenseManager;
 import com.example.orangeclient.module.Keybinds;
 import com.example.orangeclient.module.ModuleManager;
@@ -13,6 +14,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.TitleScreen;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +38,11 @@ public class OrangeClient implements ClientModInitializer {
         ClientTickEvents.START_CLIENT_TICK.register(ModuleManager::onPreTick);
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            // Zastąp ekran tytułowy Minecrafta animowanym menu Orange Client.
+            if (client.currentScreen instanceof TitleScreen
+                    && !(client.currentScreen instanceof OrangeMainMenu)) {
+                client.setScreen(new OrangeMainMenu());
+            }
             LicenseManager.refreshIfDue();
             if (client.player != null && client.world != null) LicenseManager.requireLicense(client);
             if (GuiModule.consumeOpen() && client.currentScreen == null && LicenseManager.isValid()) client.setScreen(new ClickGui());
