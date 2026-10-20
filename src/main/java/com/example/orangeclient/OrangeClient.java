@@ -36,6 +36,7 @@ public class OrangeClient implements ClientModInitializer {
         ClientTickEvents.START_CLIENT_TICK.register(ModuleManager::onPreTick);
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            LicenseManager.refreshIfDue();
             if (client.player != null && client.world != null) LicenseManager.requireLicense(client);
             if (GuiModule.consumeOpen() && client.currentScreen == null && LicenseManager.isValid()) client.setScreen(new ClickGui());
             ModuleManager.onTick(client);
