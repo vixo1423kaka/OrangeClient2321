@@ -74,7 +74,7 @@ public final class OrangeMainMenu extends Screen {
         rounded(ctx, panelX + 5, panelY + 8, panelX + panelW + 5, panelY + panelH + 8, 24, 0x50000000);
         rounded(ctx, panelX, panelY, panelX + panelW, panelY + panelH, 24, PANEL);
         roundedOutline(ctx, panelX, panelY, panelX + panelW, panelY + panelH, 24, BORDER);
-        ctx.fill(panelX + 1, panelY + 63, panelX + panelW - 1, panelY + 64, 0x302FFFFFF);
+        ctx.fill(panelX + 1, panelY + 63, panelX + panelW - 1, panelY + 64, 0x30FFFFFF);
 
         // macOS-style traffic lights, drawn as actual circles rather than square buttons.
         int lightY = panelY + 25;
