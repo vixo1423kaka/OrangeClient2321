@@ -33,12 +33,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-      - name: Check Python syntax
+      - name: Check Python syntax and generate icon
         working-directory: loader
-        run: python -m py_compile loader.py
-      - name: Build EXE with bundled mod
+        run: |
+          python -m py_compile loader.py make_icon.py
+          python make_icon.py
+      - name: Build EXE with bundled mod and orange icon
         working-directory: loader
-        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --collect-all customtkinter --add-data "../build/libs/orange-client-0.1.0.jar;client-mods" --name OrangeClientLoader loader.py
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --collect-all customtkinter --icon orange.ico --add-data "orange.ico;." --add-data "../build/libs/orange-client-0.1.0.jar;client-mods" --name OrangeClientLoader loader.py
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
