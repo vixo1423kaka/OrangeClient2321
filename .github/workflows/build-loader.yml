@@ -33,13 +33,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-      - name: Embed Azure Client ID
-        working-directory: loader
-        shell: pwsh
-        env:
-          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-        run: |
-          "AZURE_CLIENT_ID = '$($env:AZURE_CLIENT_ID)'" | Set-Content -Encoding utf8 _build_config.py
       - name: Check Python syntax
         working-directory: loader
         run: python -m py_compile loader.py
