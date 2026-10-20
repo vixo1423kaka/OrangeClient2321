@@ -4,6 +4,8 @@ import re
 import subprocess
 import threading
 import urllib.request
+import urllib.parse
+import shutil
 import tkinter as tk
 from tkinter import messagebox
 from pathlib import Path
@@ -243,6 +245,8 @@ class Loader(ctk.CTk if ctk else object):
         if not key:
             messagebox.showerror("Brak licencji", "Wpisz klucz licencji Orange Client.")
             return
+        # Dedicated loader instance: don't alter the user's existing launcher folders.
+        self.current_dir = APPDATA / "OrangeClientLoader" / "instances" / version
         try:
             config = self.current_dir / "config"
             config.mkdir(parents=True, exist_ok=True)
@@ -255,9 +259,37 @@ class Loader(ctk.CTk if ctk else object):
 
     def _launch(self, version, username):
         try:
+            minecraft_launcher_lib.install.install_minecraft_version(version, str(self.current_dir))
+            launch_version = version
+            if version == "1.21.4":
+                minecraft_launcher_lib.fabric.install_fabric(version, str(self.current_dir))
+                installed = minecraft_launcher_lib.utils.get_installed_versions(str(self.current_dir))
+                profiles = [v.get("id") for v in installed if "fabric" in v.get("id", "").lower() and "1.21.4" in v.get("id", "")]
+                if profiles:
+                    launch_version = profiles[0]
+                # The mod jar is bundled by the CI build into the EXE.
+                bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "client-mods" / "orange-client-0.1.0.jar"
+                mods = self.current_dir / "mods"
+                mods.mkdir(parents=True, exist_ok=True)
+                if bundled.exists():
+                    shutil.copy2(bundled, mods / "orange-client-0.1.0.jar")
+                else:
+                    raise RuntimeError("Brak wbudowanego pliku moda Orange Client w loaderze.")
+                # Fetch Fabric API for this Minecraft release from Modrinth.
+                api = "https://api.modrinth.com/v2/project/fabric-api/version?" + urllib.parse.urlencode({
+                    "game_versions": json.dumps(["1.21.4"]), "loaders": json.dumps(["fabric"])})
+                req = urllib.request.Request(api, headers={"User-Agent": "OrangeClientLoader/1.0"})
+                with urllib.request.urlopen(req, timeout=20) as response:
+                    api_versions = json.loads(response.read().decode("utf-8"))
+                if api_versions:
+                    file_info = next((file for file in api_versions[0].get("files", []) if file.get("primary")), api_versions[0]["files"][0])
+                    api_jar = mods / file_info["filename"]
+                    urllib.request.urlretrieve(file_info["url"], api_jar)
+            elif version != "1.21.4":
+                raise RuntimeError("Orange Client jest obecnie skonfigurowany dla Minecraft 1.21.4. Nowsze wersje można wybrać z listy, ale mod wymaga portu na te wersje.")
             options = {"username": username, "uuid": "00000000-0000-0000-0000-000000000000",
                        "token": "", "gameDirectory": str(self.current_dir)}
-            command = minecraft_launcher_lib.command.get_minecraft_command(version, str(self.current_dir), options)
+            command = minecraft_launcher_lib.command.get_minecraft_command(launch_version, str(self.current_dir), options)
             subprocess.Popen(command, cwd=str(self.current_dir))
             self.after(0, lambda: self.status.configure(text="Gra uruchomiona. Orange Client sprawdza licencję po starcie."))
         except Exception as exc:
