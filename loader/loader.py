@@ -203,22 +203,12 @@ class Loader(ctk.CTk if ctk else object):
         self.title("Orange Client")
         self.geometry("920x640")
         self.minsize(820, 560)
-        self._borderless = os.name == "nt"
+        self._borderless = False
         self._maximized = False
         self._normal_geometry = "920x640"
         self._drag_origin = None
-        # On Windows, use a color-keyed transparent desktop window so only the
-        # rounded app surface is visible outside its client area.
-        if self._borderless:
-            self.configure(fg_color="#ff00ff")
-            try:
-                self.attributes("-transparentcolor", "#ff00ff")
-                self.overrideredirect(True)
-            except tk.TclError:
-                self._borderless = False
-                self.configure(fg_color=BG)
-        else:
-            self.configure(fg_color=BG)
+        # Use the native OS frame so the launcher appears on the taskbar.
+        self.configure(fg_color=BG)
         icon_path = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "orange.ico"
         try:
             if icon_path.is_file():
@@ -246,6 +236,7 @@ class Loader(ctk.CTk if ctk else object):
         self._show_play()
         self._refresh_account_label()
         self._fade_in()
+        self._init_cursor_particles()
         if self.accounts:
             threading.Thread(target=self._silent_refresh, daemon=True).start()
 
@@ -285,26 +276,13 @@ class Loader(ctk.CTk if ctk else object):
                                   border_width=1, border_color=BORDER)
         self.shell.pack(fill="both", expand=True, padx=2, pady=2)
 
-        # macOS-inspired title bar and three traffic-light controls.
-        titlebar = ctk.CTkFrame(self.shell, fg_color=SIDE, corner_radius=20, height=42)
+        # Clean header; native minimize/maximize/close controls belong to Windows.
+        titlebar = ctk.CTkFrame(self.shell, fg_color=SIDE, corner_radius=12, height=42)
         titlebar.pack(fill="x", padx=2, pady=(2, 0))
         titlebar.pack_propagate(False)
-        lights = ctk.CTkFrame(titlebar, fg_color="transparent")
-        lights.pack(side="right", padx=(10, 14), pady=10)
-        for color, hover, command in (
-            ("#ff5f57", "#ff817b", self._window_close),
-            ("#febc2e", "#ffd166", self._window_minimize),
-            ("#28c840", "#55df68", self._window_toggle_maximize),
-        ):
-            ctk.CTkButton(lights, text="", width=13, height=13, corner_radius=8,
-                          fg_color=color, hover_color=hover, border_width=0,
-                          command=command).pack(side="left", padx=(0, 7))
-        title = ctk.CTkLabel(titlebar, text="Orange Client", text_color="#c5cad4",
+        title = ctk.CTkLabel(titlebar, text="ORANGE CLIENT", text_color="#c5cad4",
                              font=("Segoe UI", 12, "bold"))
-        title.pack(side="left", padx=4)
-        for widget in (titlebar, title):
-            widget.bind("<ButtonPress-1>", self._drag_start)
-            widget.bind("<B1-Motion>", self._drag_motion)
+        title.pack(side="left", padx=14)
 
         content = ctk.CTkFrame(self.shell, fg_color="transparent", corner_radius=20)
         content.pack(side="top", fill="both", expand=True, padx=2, pady=(2, 2))
@@ -343,11 +321,47 @@ class Loader(ctk.CTk if ctk else object):
         if not self.winfo_exists():
             return
         try:
-            self.attributes("-alpha", min(1.0, 0.18 + step * 0.10))
+            self.attributes("-alpha", min(0.95, 0.55 + step * 0.05))
         except tk.TclError:
             return
         if step < 8:
             self.after(18, lambda: self._fade_in(step + 1))
+
+    def _init_cursor_particles(self):
+        """Orange particles drift behind the pointer."""
+        import random
+        self._particles = []
+        self._particle_canvas = tk.Canvas(self, bg=BG, highlightthickness=0, bd=0)
+        self._particle_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self._particle_canvas.lower()
+        self.bind("<Motion>", self._spawn_cursor_particle, add="+")
+        self._animate_cursor_particles()
+
+    def _spawn_cursor_particle(self, event):
+        import random
+        radius = random.randint(2, 4)
+        color = random.choice(["#ff8617", "#ff9d42", "#d85d12"])
+        item = self._particle_canvas.create_oval(event.x-radius, event.y-radius,
+                                                 event.x+radius, event.y+radius,
+                                                 fill=color, outline="")
+        self._particles.append([item, event.x, event.y, random.uniform(-1.2, 1.2),
+                                random.uniform(0.6, 2.0), 16])
+
+    def _animate_cursor_particles(self):
+        if not self.winfo_exists():
+            return
+        alive = []
+        for item, x, y, dx, dy, life in self._particles:
+            life -= 1
+            x += dx
+            y -= dy
+            if life > 0:
+                self._particle_canvas.coords(item, x-2, y-2, x+2, y+2)
+                alive.append([item, x, y, dx*0.97, dy*0.97, life])
+            else:
+                self._particle_canvas.delete(item)
+        self._particles = alive[-100:]
+        self.after(30, self._animate_cursor_particles)
 
     def _drag_start(self, event):
         if self._maximized:
@@ -364,12 +378,7 @@ class Loader(ctk.CTk if ctk else object):
         self.destroy()
 
     def _window_minimize(self):
-        if self._borderless:
-            self.overrideredirect(False)
-            self.iconify()
-            self.bind("<Map>", self._restore_borderless, add="+")
-        else:
-            self.iconify()
+        self.iconify()
 
     def _restore_borderless(self, _event=None):
         if self._borderless:
