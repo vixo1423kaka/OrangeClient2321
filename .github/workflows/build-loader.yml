@@ -33,6 +33,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+      - name: Embed Azure Client ID
+        working-directory: loader
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+        run: |
+          "AZURE_CLIENT_ID = '$($env:AZURE_CLIENT_ID)'" | Set-Content -Encoding utf8 _build_config.py
       - name: Build EXE with bundled mod
         working-directory: loader
         run: python -m PyInstaller --noconfirm --clean --onefile --windowed --collect-all customtkinter --add-data "../build/libs/orange-client-0.1.0.jar;client-mods" --name OrangeClientLoader loader.py

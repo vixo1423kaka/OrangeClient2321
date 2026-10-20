@@ -16,6 +16,9 @@ Loader loguje przez własną aplikację Azure (nie czyta tokenów z innych launc
 1. https://portal.azure.com → Microsoft Entra ID → App registrations → New registration.
 2. Supported account types: **Personal Microsoft accounts only**.
 3. Redirect URI: platforma **Mobile and desktop applications**, wartość `http://localhost`.
-4. Skopiuj *Application (client) ID* i wklej w loaderze: Ustawienia → Azure Client ID
-   (albo wpisz w `AZURE_CLIENT_ID` w `loader.py` przed buildem).
+4. Skopiuj *Application (client) ID* i ustaw go raz jako zmienną repozytorium `AZURE_CLIENT_ID`
+   (GitHub → Settings → Secrets and variables → Actions → Variables). Build wbudowuje go w EXE,
+   więc użytkownik niczego nie wpisuje, a pole w Ustawieniach się nie pokazuje.
+   Przy lokalnym buildzie (`build.bat`) utwórz `loader/_build_config.py` z linią
+   `AZURE_CLIENT_ID = "twoje-id"`. Bez wbudowanego ID loader pokaże pole w Ustawieniach.
 5. Nowe aplikacje wymagają zgody Mojang na Minecraft API: https://aka.ms/AppRegInfo

@@ -42,9 +42,14 @@ SETTINGS_FILE = DATA_DIR / "settings.json"
 INSTANCES = DATA_DIR / "instances"
 MOD_JAR = "orange-client-0.1.0.jar"
 SUPPORTED_VERSIONS = ["1.21.4"]   # wersje, dla których zbudowany jest mod
-# Client ID własnej aplikacji Azure (patrz README). Można nadpisać zmienną środowiskową
-# ORANGE_AZURE_CLIENT_ID lub polem w Ustawieniach.
-AZURE_CLIENT_ID = ""
+# Client ID własnej aplikacji Azure (patrz README). Wbudowywany przy buildzie (workflow generuje
+# _build_config.py ze zmiennej repo AZURE_CLIENT_ID), więc użytkownik niczego nie wpisuje.
+# Awaryjnie można wpisać go tutaj na stałe, nadpisać zmienną środowiskową ORANGE_AZURE_CLIENT_ID
+# albo (tylko gdy nic nie jest wbudowane) wpisać w Ustawieniach.
+try:
+    from _build_config import AZURE_CLIENT_ID  # type: ignore[import-not-found]
+except ImportError:
+    AZURE_CLIENT_ID = ""
 REDIRECT_PORT = 28487
 REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}"
 
@@ -236,8 +241,8 @@ class Loader(ctk.CTk if ctk else object):
         return ""
 
     def _client_id(self):
-        return (os.environ.get("ORANGE_AZURE_CLIENT_ID") or self.settings.get("azure_client_id")
-                or AZURE_CLIENT_ID).strip()
+        return (os.environ.get("ORANGE_AZURE_CLIENT_ID") or AZURE_CLIENT_ID.strip()
+                or self.settings.get("azure_client_id") or "").strip()
 
     def _persist(self):
         self.settings["license_key"] = self.license_key.get().strip()
@@ -352,12 +357,14 @@ class Loader(ctk.CTk if ctk else object):
         ctk.CTkLabel(c, text=str(INSTANCES), text_color=MUTED, font=("Segoe UI", 11), anchor="w").pack(fill="x", padx=16)
         ctk.CTkButton(c, text="Otwórz folder", width=130, height=32, fg_color="#2b3446", hover_color="#38445b",
                       command=self._open_dir).pack(anchor="w", padx=16, pady=(8, 14))
-        c = self._card("AZURE CLIENT ID (logowanie Microsoft)")
-        self.cid_var = tk.StringVar(value=self._client_id())
-        ctk.CTkEntry(c, textvariable=self.cid_var, height=34, border_color=BORDER,
-                     placeholder_text="np. 00000000-0000-0000-0000-000000000000").pack(fill="x", padx=16)
-        ctk.CTkButton(c, text="Zapisz", width=90, height=32, fg_color="#2b3446", hover_color="#38445b",
-                      command=self._save_cid).pack(anchor="w", padx=16, pady=(8, 14))
+        if not (AZURE_CLIENT_ID.strip() or os.environ.get("ORANGE_AZURE_CLIENT_ID")):
+            # Pole pokazujemy tylko, gdy Client ID nie jest wbudowany w loader.
+            c = self._card("AZURE CLIENT ID (logowanie Microsoft)")
+            self.cid_var = tk.StringVar(value=self._client_id())
+            ctk.CTkEntry(c, textvariable=self.cid_var, height=34, border_color=BORDER,
+                         placeholder_text="np. 00000000-0000-0000-0000-000000000000").pack(fill="x", padx=16)
+            ctk.CTkButton(c, text="Zapisz", width=90, height=32, fg_color="#2b3446", hover_color="#38445b",
+                          command=self._save_cid).pack(anchor="w", padx=16, pady=(8, 14))
 
     def _open_dir(self):
         INSTANCES.mkdir(parents=True, exist_ok=True)
