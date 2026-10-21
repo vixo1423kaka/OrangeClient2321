@@ -1,5 +1,6 @@
 import ctypes
 import http.server
+import io
 import json
 import os
 import re
@@ -14,6 +15,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 from tkinter import messagebox
+from PIL import Image
 
 # --- Ukrywanie okien cmd na Windows (Java, instalator Fabric itp.) -------------------------
 if os.name == "nt":
@@ -338,8 +340,11 @@ class Loader(ctk.CTk if ctk else object):
 
         main = ctk.CTkFrame(content, fg_color="transparent", corner_radius=18)
         main.pack(side="left", fill="both", expand=True)
-        self.page = ctk.CTkFrame(main, fg_color="transparent", corner_radius=18)
-        self.page.pack(fill="both", expand=True, padx=12, pady=(6, 10))
+        # Scrollable page area keeps long settings/play forms accessible while the bottom PLAY dock stays fixed.
+        self.page = ctk.CTkScrollableFrame(main, fg_color="transparent", corner_radius=18,
+                                           scrollbar_button_color="#343d4d",
+                                           scrollbar_button_hover_color=ORANGE)
+        self.page.pack(fill="both", expand=True, padx=12, pady=(6, 8))
 
         dock = ctk.CTkFrame(main, fg_color="#151a23", corner_radius=15,
                             border_width=1, border_color="#272d38")
@@ -648,18 +653,54 @@ class Loader(ctk.CTk if ctk else object):
             ctk.CTkLabel(self.mod_results, text="Brak wyników.", text_color=MUTED).pack(anchor="w", padx=10, pady=10)
             return
         for item in results:
-            card = ctk.CTkFrame(self.mod_results, fg_color=PANEL, corner_radius=8)
-            card.pack(fill="x", padx=3, pady=4)
+            card = ctk.CTkFrame(self.mod_results, fg_color=PANEL, corner_radius=10,
+                                border_width=1, border_color=BORDER)
+            card.pack(fill="x", padx=3, pady=5)
+            card.bind("<Button-1>", lambda _e, mod=item: self._open_modrinth_project(mod))
+            icon_label = ctk.CTkLabel(card, text="◈", width=64, height=64,
+                                      fg_color="#21170f", corner_radius=9,
+                                      text_color=ORANGE, font=("Segoe UI", 24, "bold"))
+            icon_label.pack(side="left", padx=(10, 0), pady=10)
+            icon_label.bind("<Button-1>", lambda _e, mod=item: self._open_modrinth_project(mod))
             details = ctk.CTkFrame(card, fg_color="transparent")
-            details.pack(side="left", fill="x", expand=True, padx=10, pady=8)
-            ctk.CTkLabel(details, text=item.get("title", item.get("slug", "Mod")),
-                         font=("Segoe UI", 12, "bold"), text_color=TEXT).pack(anchor="w")
+            details.pack(side="left", fill="x", expand=True, padx=12, pady=9)
+            title_label = ctk.CTkLabel(details, text=item.get("title", item.get("slug", "Mod")),
+                                       font=("Segoe UI", 13, "bold"), text_color=TEXT, anchor="w")
+            title_label.pack(anchor="w", fill="x")
+            title_label.bind("<Button-1>", lambda _e, mod=item: self._open_modrinth_project(mod))
             desc = (item.get("description") or "").replace("\\n", " ")
-            ctk.CTkLabel(details, text=desc[:150], text_color=MUTED, font=("Segoe UI", 10),
-                         wraplength=340, justify="left").pack(anchor="w")
-            ctk.CTkButton(card, text="Zainstaluj", width=100, height=32,
+            desc_label = ctk.CTkLabel(details, text=desc[:220], text_color=MUTED,
+                                      font=("Segoe UI", 10), wraplength=390, justify="left", anchor="w")
+            desc_label.pack(anchor="w", fill="x", pady=(3, 0))
+            desc_label.bind("<Button-1>", lambda _e, mod=item: self._open_modrinth_project(mod))
+            ctk.CTkButton(card, text="Install", width=90, height=32,
                           fg_color=ORANGE, hover_color=ORANGE_H, text_color="#101116",
                           command=lambda mod=item, ver=version: self._install_mod_clicked(mod, ver)).pack(side="right", padx=10, pady=8)
+            if item.get("icon_url"):
+                threading.Thread(target=self._load_mod_icon, args=(item, icon_label), daemon=True).start()
+
+    def _open_modrinth_project(self, item):
+        slug = item.get("slug") or item.get("project_id") or ""
+        if slug:
+            webbrowser.open("https://modrinth.com/mod/" + urllib.parse.quote(slug, safe=""))
+
+    def _load_mod_icon(self, item, label):
+        """Load Modrinth's project icon off the UI thread and attach it on the Tk thread."""
+        try:
+            request = urllib.request.Request(item["icon_url"],
+                                             headers={"User-Agent": "OrangeClientLoader/1.2"})
+            with urllib.request.urlopen(request, timeout=12) as response:
+                raw = response.read(2 * 1024 * 1024)
+            image = Image.open(io.BytesIO(raw)).convert("RGBA")
+            image.thumbnail((64, 64))
+            photo = ctk.CTkImage(light_image=image, dark_image=image, size=(64, 64))
+            def apply_icon():
+                if label.winfo_exists():
+                    label.configure(image=photo, text="", width=64, height=64)
+                    label.image = photo
+            self.ui(apply_icon)
+        except Exception:
+            pass
 
     def _install_mod_clicked(self, item, version):
         if self._busy:
