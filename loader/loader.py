@@ -207,14 +207,8 @@ class Loader(ctk.CTk if ctk else object):
         self._maximized = False
         self._normal_geometry = "920x640"
         self._drag_origin = None
-        # Frameless macOS-style window with a color-key background for genuinely rounded outer corners.
-        self._corner_key = "#ff00ff"
-        self.configure(fg_color=self._corner_key)
-        if os.name == "nt":
-            try:
-                self.attributes("-transparentcolor", self._corner_key)
-            except tk.TclError:
-                pass
+        # Opaque, frameless launcher. Ask Windows DWM for rounded native window corners.
+        self.configure(fg_color=BG)
         try:
             self.overrideredirect(True)
         except tk.TclError:
@@ -245,8 +239,9 @@ class Loader(ctk.CTk if ctk else object):
         self._build_ui()
         self._show_play()
         self._refresh_account_label()
-        self._fade_in()
+        self.after(120, self._apply_window_rounding)
         self._init_cursor_particles()
+        self._animate_accent()
         if self.accounts:
             threading.Thread(target=self._silent_refresh, daemon=True).start()
 
@@ -281,10 +276,10 @@ class Loader(ctk.CTk if ctk else object):
 
     # ---- UI ---------------------------------------------------------------------------------
     def _build_ui(self):
-        # Rounded application shell sits over a transparent color-key background.
-        self.shell = ctk.CTkFrame(self, fg_color=BG, corner_radius=36,
+        # Solid shell: no color-key or alpha transparency. Rounded visual design inside the window.
+        self.shell = ctk.CTkFrame(self, fg_color=BG, corner_radius=28,
                                   border_width=1, border_color=BORDER)
-        self.shell.pack(fill="both", expand=True, padx=8, pady=8)
+        self.shell.pack(fill="both", expand=True, padx=0, pady=0)
 
         # Clean header; native minimize/maximize/close controls belong to Windows.
         titlebar = ctk.CTkFrame(self.shell, fg_color=SIDE, corner_radius=12, height=42)
@@ -339,16 +334,32 @@ class Loader(ctk.CTk if ctk else object):
                                    anchor="w", justify="left", wraplength=420)
         self.status.pack(side="left", fill="x", expand=True)
 
-    def _fade_in(self, step=0):
-        """Subtle startup fade; ignored on platforms without window alpha."""
-        if not self.winfo_exists():
+    def _apply_window_rounding(self):
+        """Request Windows 11 rounded corners without making the window transparent."""
+        if os.name != "nt" or not self.winfo_exists():
             return
         try:
-            self.attributes("-alpha", min(0.95, 0.55 + step * 0.05))
+            DWMWA_WINDOW_CORNER_PREFERENCE = 33
+            DWMWCP_ROUND = 2
+            preference = ctypes.c_int(DWMWCP_ROUND)
+            hwnd = ctypes.windll.user32.GetParent(self.winfo_id()) or self.winfo_id()
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+                ctypes.byref(preference), ctypes.sizeof(preference))
+        except (AttributeError, OSError, tk.TclError):
+            pass
+
+    def _animate_accent(self, step=0):
+        """Gently pulse the Orange Client play button for a polished launcher feel."""
+        if not self.winfo_exists():
+            return
+        palette = ("#f47c20", "#f98227", "#ff963f", "#f98227")
+        try:
+            if hasattr(self, "play_btn") and self.play_btn.winfo_exists():
+                self.play_btn.configure(fg_color=palette[step % len(palette)])
         except tk.TclError:
             return
-        if step < 8:
-            self.after(18, lambda: self._fade_in(step + 1))
+        self.after(240, lambda: self._animate_accent(step + 1))
 
     def _init_cursor_particles(self):
         """Orange particles drift behind the pointer."""
