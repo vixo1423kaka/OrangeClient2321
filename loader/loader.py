@@ -241,6 +241,7 @@ class Loader(ctk.CTk if ctk else object):
         self._build_ui()
         self._show_play()
         self._refresh_account_label()
+        self.after(180, self._apply_taskbar_visibility)
         self.after(120, self._apply_window_rounding)
         self._init_cursor_particles()
         self._animate_accent()
@@ -288,8 +289,10 @@ class Loader(ctk.CTk if ctk else object):
         titlebar.pack_propagate(False)
         brand = ctk.CTkFrame(titlebar, fg_color="transparent")
         brand.pack(side="left", fill="y")
-        mark = ctk.CTkLabel(brand, text="◈", text_color=ORANGE, font=("Segoe UI", 22, "bold"))
+        mark = ctk.CTkLabel(brand, text="◈", text_color=ORANGE, font=("Segoe UI", 22, "bold"),
+                            cursor="hand2")
         mark.pack(side="left", padx=(8, 8))
+        mark.bind("<Button-1>", lambda _event: self._window_minimize())
         title = ctk.CTkLabel(brand, text="ORANGE", text_color=TEXT, font=("Segoe UI", 13, "bold"))
         title.pack(side="left")
         ctk.CTkLabel(brand, text="  CLIENT", text_color=ORANGE, font=("Segoe UI", 12, "bold")).pack(side="left")
@@ -358,6 +361,34 @@ class Loader(ctk.CTk if ctk else object):
         self.status = ctk.CTkLabel(inner, text="Ready when you are.", font=("Segoe UI", 12),
                                    text_color=MUTED, anchor="w", justify="left", wraplength=430)
         self.status.pack(side="left", fill="x", expand=True)
+
+    def _apply_taskbar_visibility(self):
+        """Keep the custom borderless window represented on the Windows taskbar."""
+        if os.name != "nt" or not self.winfo_exists():
+            return
+        try:
+            hwnd = self.winfo_id()
+            user32 = ctypes.windll.user32
+            GWL_EXSTYLE = -20
+            WS_EX_APPWINDOW = 0x00040000
+            WS_EX_TOOLWINDOW = 0x00000080
+            SWP_NOSIZE = 0x0001
+            SWP_NOMOVE = 0x0002
+            SWP_NOZORDER = 0x0004
+            SWP_FRAMECHANGED = 0x0020
+            get_long = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+            set_long = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+            get_long.restype = ctypes.c_ssize_t
+            get_long.argtypes = (ctypes.c_void_p, ctypes.c_int)
+            set_long.restype = ctypes.c_ssize_t
+            set_long.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.c_ssize_t)
+            style = get_long(hwnd, GWL_EXSTYLE)
+            style = (style | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW
+            set_long(hwnd, GWL_EXSTYLE, style)
+            user32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED)
+        except (AttributeError, OSError, tk.TclError):
+            pass
 
     def _apply_window_rounding(self):
         """Request Windows 11 rounded corners without making the window transparent."""
