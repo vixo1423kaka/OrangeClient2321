@@ -464,11 +464,23 @@ class Loader(ctk.CTk if ctk else object):
 
     def _drag_start(self, event):
         if self._maximized:
-            return
+            return "break"
+        if os.name == "nt":
+            # Let Windows perform the move loop natively to avoid jitter.
+            try:
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(self.winfo_id()) or self.winfo_id()
+                user32.ReleaseCapture()
+                user32.SendMessageW(hwnd, 0x00A1, 2, 0)  # WM_NCLBUTTONDOWN / HTCAPTION
+                return "break"
+            except (AttributeError, OSError):
+                pass
         self._drag_origin = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+        return "break"
 
     def _drag_motion(self, event):
-        if self._drag_origin and not self._maximized:
+        # Windows uses its native drag loop; this is the non-Windows fallback.
+        if os.name != "nt" and self._drag_origin and not self._maximized:
             x = event.x_root - self._drag_origin[0]
             y = event.y_root - self._drag_origin[1]
             self.geometry(f"+{x}+{y}")
