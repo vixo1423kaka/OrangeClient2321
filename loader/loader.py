@@ -201,11 +201,11 @@ class Loader(ctk.CTk if ctk else object):
         ctk.set_default_color_theme("dark-blue")
         super().__init__()
         self.title("Orange Client")
-        self.geometry("920x640")
-        self.minsize(820, 560)
+        self.geometry("1020x720")
+        self.minsize(900, 650)
         self._borderless = True
         self._maximized = False
-        self._normal_geometry = "920x640"
+        self._normal_geometry = "1020x720"
         self._drag_origin = None
         # Opaque, frameless launcher. Ask Windows DWM for rounded native window corners.
         self.configure(fg_color=BG)
@@ -276,23 +276,26 @@ class Loader(ctk.CTk if ctk else object):
 
     # ---- UI ---------------------------------------------------------------------------------
     def _build_ui(self):
-        # Solid shell: no color-key or alpha transparency. Rounded visual design inside the window.
-        self.shell = ctk.CTkFrame(self, fg_color=BG, corner_radius=28,
+        # Modrinth-inspired launcher shell: solid dark surfaces, orange highlights and clear navigation.
+        self.shell = ctk.CTkFrame(self, fg_color=BG, corner_radius=24,
                                   border_width=1, border_color=BORDER)
         self.shell.pack(fill="both", expand=True, padx=0, pady=0)
 
-        # Clean header; native minimize/maximize/close controls belong to Windows.
-        titlebar = ctk.CTkFrame(self.shell, fg_color=SIDE, corner_radius=12, height=42)
-        titlebar.pack(fill="x", padx=2, pady=(2, 0))
+        titlebar = ctk.CTkFrame(self.shell, fg_color=BG, corner_radius=14, height=44)
+        titlebar.pack(fill="x", padx=12, pady=(10, 4))
         titlebar.pack_propagate(False)
-        title = ctk.CTkLabel(titlebar, text="ORANGE CLIENT", text_color="#c5cad4",
-                             font=("Segoe UI", 12, "bold"))
-        title.pack(side="left", padx=14)
-        for widget in (titlebar, title):
+        brand = ctk.CTkFrame(titlebar, fg_color="transparent")
+        brand.pack(side="left", fill="y")
+        mark = ctk.CTkLabel(brand, text="◈", text_color=ORANGE, font=("Segoe UI", 22, "bold"))
+        mark.pack(side="left", padx=(8, 8))
+        title = ctk.CTkLabel(brand, text="ORANGE", text_color=TEXT, font=("Segoe UI", 13, "bold"))
+        title.pack(side="left")
+        ctk.CTkLabel(brand, text="  CLIENT", text_color=ORANGE, font=("Segoe UI", 12, "bold")).pack(side="left")
+        for widget in (titlebar, brand, mark, title):
             widget.bind("<ButtonPress-1>", self._drag_start)
             widget.bind("<B1-Motion>", self._drag_motion)
         lights = ctk.CTkFrame(titlebar, fg_color="transparent")
-        lights.pack(side="right", padx=(10, 14), pady=10)
+        lights.pack(side="right", padx=(10, 4), pady=10)
         for color, hover, command in (
             ("#ff5f57", "#ff817b", self._window_close),
             ("#febc2e", "#ffd166", self._window_minimize),
@@ -302,36 +305,53 @@ class Loader(ctk.CTk if ctk else object):
                           fg_color=color, hover_color=hover, border_width=0,
                           command=command).pack(side="left", padx=(0, 7))
 
-        content = ctk.CTkFrame(self.shell, fg_color="transparent", corner_radius=20)
-        content.pack(side="top", fill="both", expand=True, padx=2, pady=(2, 2))
-        side = ctk.CTkFrame(content, width=170, corner_radius=18, fg_color=SIDE)
-        side.pack(side="left", fill="y", padx=(0, 2))
+        content = ctk.CTkFrame(self.shell, fg_color="transparent", corner_radius=18)
+        content.pack(side="top", fill="both", expand=True, padx=12, pady=(2, 12))
+        side = ctk.CTkFrame(content, width=190, corner_radius=16, fg_color=SIDE)
+        side.pack(side="left", fill="y", padx=(0, 10))
         side.pack_propagate(False)
-        ctk.CTkLabel(side, text="ORANGE", font=("Segoe UI", 20, "bold"), text_color=ORANGE).pack(anchor="w", padx=20, pady=(26, 0))
-        ctk.CTkLabel(side, text="CLIENT", font=("Segoe UI", 11, "bold"), text_color=MUTED).pack(anchor="w", padx=20, pady=(0, 28))
+
+        logo = ctk.CTkFrame(side, fg_color="#21170f", corner_radius=14, height=82)
+        logo.pack(fill="x", padx=12, pady=(16, 24))
+        logo.pack_propagate(False)
+        ctk.CTkLabel(logo, text="O", text_color=ORANGE, font=("Segoe UI", 32, "bold")).pack(side="left", padx=(16, 10), pady=12)
+        logo_text = ctk.CTkFrame(logo, fg_color="transparent")
+        logo_text.pack(side="left", fill="y", pady=18)
+        ctk.CTkLabel(logo_text, text="ORANGE", text_color=TEXT, font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        ctk.CTkLabel(logo_text, text="CLIENT", text_color=ORANGE, font=("Segoe UI", 10, "bold")).pack(anchor="w")
+
+        ctk.CTkLabel(side, text="LIBRARY", text_color="#606b7d", font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=18, pady=(0, 8))
         self.nav = {}
-        for key, label, cmd in (("play", "Play", self._show_play), ("mods", "Mods", self._show_mods), ("settings", "Settings", self._show_settings)):
-            b = ctk.CTkButton(side, text=label, anchor="w", height=38, corner_radius=8,
-                              fg_color="transparent", hover_color="#1b2230", text_color=MUTED,
+        for key, label, cmd in (("play", "▶    Play", self._show_play), ("mods", "▦    Discover mods", self._show_mods), ("settings", "⚙    Settings", self._show_settings)):
+            b = ctk.CTkButton(side, text=label, anchor="w", height=42, corner_radius=10,
+                              fg_color="transparent", hover_color="#242b37", text_color=MUTED,
                               font=("Segoe UI", 13), command=cmd)
-            b.pack(fill="x", padx=10, pady=2)
+            b.pack(fill="x", padx=10, pady=3)
             self.nav[key] = b
+
+        bottom = ctk.CTkFrame(side, fg_color="#151b24", corner_radius=12)
+        bottom.pack(side="bottom", fill="x", padx=12, pady=12)
+        ctk.CTkLabel(bottom, text="●  CLIENT READY", text_color="#f59a42",
+                     font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=12, pady=(10, 2))
+        ctk.CTkLabel(bottom, text="Minecraft Java", text_color=MUTED,
+                     font=("Segoe UI", 10)).pack(anchor="w", padx=12, pady=(0, 10))
 
         main = ctk.CTkFrame(content, fg_color="transparent", corner_radius=18)
         main.pack(side="left", fill="both", expand=True)
         self.page = ctk.CTkFrame(main, fg_color="transparent", corner_radius=18)
-        self.page.pack(fill="both", expand=True, padx=28, pady=(20, 8))
+        self.page.pack(fill="both", expand=True, padx=12, pady=(6, 10))
 
-        dock = ctk.CTkFrame(main, fg_color=SIDE, corner_radius=16)
+        dock = ctk.CTkFrame(main, fg_color="#151a23", corner_radius=15,
+                            border_width=1, border_color="#272d38")
         dock.pack(side="bottom", fill="x", padx=2, pady=2)
         inner = ctk.CTkFrame(dock, fg_color="transparent")
-        inner.pack(fill="x", padx=24, pady=12)
-        self.play_btn = ctk.CTkButton(inner, text="▶  PLAY", width=190, height=48, corner_radius=14,
+        inner.pack(fill="x", padx=18, pady=12)
+        self.play_btn = ctk.CTkButton(inner, text="▶   PLAY", width=190, height=48, corner_radius=12,
                                       font=("Segoe UI", 15, "bold"), fg_color=ORANGE, hover_color=ORANGE_H,
                                       text_color="#101116", command=self.play)
         self.play_btn.pack(side="right")
-        self.status = ctk.CTkLabel(inner, text="Ready.", font=("Segoe UI", 12), text_color=MUTED,
-                                   anchor="w", justify="left", wraplength=420)
+        self.status = ctk.CTkLabel(inner, text="Ready when you are.", font=("Segoe UI", 12),
+                                   text_color=MUTED, anchor="w", justify="left", wraplength=430)
         self.status.pack(side="left", fill="x", expand=True)
 
     def _apply_window_rounding(self):
@@ -450,15 +470,34 @@ class Loader(ctk.CTk if ctk else object):
     def _show_play(self):
         self._set_nav("play")
         self._clear()
-        ctk.CTkLabel(self.page, text="Play", font=("Segoe UI", 26, "bold"), text_color=TEXT).pack(anchor="w", pady=(0, 8))
 
-        c = self._card("VERSION")
+        # Large animated hero panel: this is the visible focal point, not just a recoloured form.
+        hero = ctk.CTkFrame(self.page, fg_color="#1b1714", corner_radius=18,
+                            border_width=1, border_color="#49301f", height=150)
+        hero.pack(fill="x", pady=(0, 14))
+        hero.pack_propagate(False)
+        self.hero_canvas = tk.Canvas(hero, bg="#1b1714", highlightthickness=0, bd=0)
+        self.hero_canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self._hero_phase = 0
+        self._animate_hero()
+        ctk.CTkLabel(hero, text="YOUR NEXT ADVENTURE", font=("Segoe UI", 10, "bold"),
+                     text_color="#ff9a4a").place(x=22, y=20)
+        ctk.CTkLabel(hero, text="Ready to play?", font=("Segoe UI", 28, "bold"),
+                     text_color="#fff7ef").place(x=20, y=43)
+        ctk.CTkLabel(hero, text="Your Minecraft. Your mods. Your Orange Client.",
+                     font=("Segoe UI", 12), text_color="#c4b6aa").place(x=23, y=91)
+        ctk.CTkLabel(hero, text="✦", font=("Segoe UI", 46, "bold"),
+                     text_color="#ff8a2a").place(relx=0.88, rely=0.27, anchor="center")
+        ctk.CTkLabel(self.page, text="Launch configuration", font=("Segoe UI", 19, "bold"),
+                     text_color=TEXT).pack(anchor="w", pady=(0, 8))
+
+        c = self._card("GAME VERSION")
         self.version_box = ctk.CTkComboBox(c, values=SUPPORTED_VERSIONS, state="readonly", height=36,
                                            border_color=BORDER, button_color="#2b3446",
                                            command=self._on_version_changed)
         self.version_box.set(self.settings.get("version", SUPPORTED_VERSIONS[0]) if self.settings.get("version") in SUPPORTED_VERSIONS else SUPPORTED_VERSIONS[0])
         self.version_box.pack(fill="x", padx=16, pady=(0, 4))
-        ctk.CTkLabel(c, text="Orange Client jest obecnie dostępny dla 1.21.4. Pozostałe wersje uruchamiają Fabric i zgodne mody.",
+        ctk.CTkLabel(c, text="Orange Client is currently available for 1.21.4. Other versions launch Fabric with compatible mods.",
                      text_color=MUTED, font=("Segoe UI", 10), wraplength=620, justify="left").pack(anchor="w", padx=16, pady=(0, 12))
 
         c = self._card("ACCOUNT")
@@ -477,21 +516,51 @@ class Loader(ctk.CTk if ctk else object):
         self.login_btn = ctk.CTkButton(self.account_row, text="Sign in", width=90, height=34,
                                        fg_color=ORANGE, hover_color=ORANGE_H, text_color="#101116",
                                        command=self._login_clicked)
-        self.logout_btn = ctk.CTkButton(self.account_row, text="Wyloguj", width=90, height=34,
+        self.logout_btn = ctk.CTkButton(self.account_row, text="Log out", width=90, height=34,
                                         fg_color="#2b3446", hover_color="#38445b", command=self._logout)
-        self.more_btn = ctk.CTkButton(self.account_row, text="+ Inne konto", width=110, height=34,
+        self.more_btn = ctk.CTkButton(self.account_row, text="+ Add account", width=110, height=34,
                                       fg_color="#2b3446", hover_color="#38445b",
                                       command=lambda: self._login_clicked(other=True))
         self._layout_account_row()
 
-        c = self._card("KLUCZ LICENCJI")
+        c = self._card("LICENSE KEY")
         row = ctk.CTkFrame(c, fg_color="transparent")
         row.pack(fill="x", padx=16, pady=(0, 14))
         self.key_entry = ctk.CTkEntry(row, textvariable=self.license_key, height=36, show="•",
-                                      placeholder_text="Wklej klucz (zapisze się automatycznie)", border_color=BORDER)
+                                      placeholder_text="Paste your license key — saved automatically", border_color=BORDER)
         self.key_entry.pack(side="left", fill="x", expand=True)
-        self.show_key = ctk.CTkCheckBox(row, text="Pokaż", width=70, command=self._toggle_key)
+        self.show_key = ctk.CTkCheckBox(row, text="Show", width=70, command=self._toggle_key)
         self.show_key.pack(side="left", padx=(12, 0))
+
+    def _animate_hero(self):
+        """Visible, continuous orange glow and moving particles in the hero banner."""
+        if not self.winfo_exists():
+            return
+        canvas = getattr(self, "hero_canvas", None)
+        if canvas is not None:
+            try:
+                if canvas.winfo_exists():
+                    canvas.delete("motion")
+                    w, h = max(canvas.winfo_width(), 1), max(canvas.winfo_height(), 1)
+                    phase = getattr(self, "_hero_phase", 0)
+                    # Orange luminous bands slide across the right side of the banner.
+                    center = int(w * (0.70 + 0.08 * __import__("math").sin(phase / 10)))
+                    for i, color in enumerate(("#3a2418", "#482817", "#5a3018")):
+                        x = center + i * 20
+                        canvas.create_oval(x-48, 12+i*8, x+48, h-12-i*8,
+                                           outline=color, width=2, tags="motion")
+                    import random
+                    for i in range(12):
+                        x = (phase * (2 + i % 3) + i * 71) % w
+                        y = 18 + (i * 29) % max(h-36, 1)
+                        r = 2 + (i % 3)
+                        canvas.create_oval(x-r, y-r, x+r, y+r,
+                                           fill=("#ff8a2a" if i % 2 else "#d95d16"),
+                                           outline="", tags="motion")
+                    self._hero_phase = phase + 1
+            except tk.TclError:
+                pass
+        self.after(45, self._animate_hero)
 
     def _on_version_changed(self, value):
         self.settings["version"] = value
