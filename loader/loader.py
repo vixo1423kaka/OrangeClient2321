@@ -235,11 +235,14 @@ class Loader(ctk.CTk if ctk else object):
         self.license_key.trace_add("write", lambda *_: self._persist())
         self.username.trace_add("write", lambda *_: self._persist())
         self._busy = False
+        self.detected_game = None
+        self._detection_running = False
 
         self._build_ui()
         self._show_play()
         self._refresh_account_label()
         self.after(180, self._apply_taskbar_visibility)
+        self.after(700, self._schedule_game_detection)
         self.after(120, self._apply_window_rounding)
         self._init_cursor_particles()
         self._animate_accent()
@@ -352,11 +355,11 @@ class Loader(ctk.CTk if ctk else object):
         dock.pack(side="bottom", fill="x", padx=2, pady=2)
         inner = ctk.CTkFrame(dock, fg_color="transparent")
         inner.pack(fill="x", padx=18, pady=12)
-        self.play_btn = ctk.CTkButton(inner, text="▶   PLAY", width=190, height=48, corner_radius=12,
-                                      font=("Segoe UI", 15, "bold"), fg_color=ORANGE, hover_color=ORANGE_H,
-                                      text_color="#101116", command=self.play)
+        self.play_btn = ctk.CTkButton(inner, text="LOAD", width=190, height=48, corner_radius=12,
+                                      font=("Segoe UI", 15, "bold"), fg_color="#343b49", hover_color="#424b5d",
+                                      text_color="#aeb6c5", state="disabled", command=self.load_client)
         self.play_btn.pack(side="right")
-        self.status = ctk.CTkLabel(inner, text="Ready when you are.", font=("Segoe UI", 12),
+        self.status = ctk.CTkLabel(inner, text="Looking for Minecraft 1.21.4 + Fabric API…", font=("Segoe UI", 12),
                                    text_color=MUTED, anchor="w", justify="left", wraplength=430)
         self.status.pack(side="left", fill="x", expand=True)
 
@@ -416,7 +419,7 @@ class Loader(ctk.CTk if ctk else object):
             return
         palette = ("#f47c20", "#f98227", "#ff963f", "#f98227")
         try:
-            if hasattr(self, "play_btn") and self.play_btn.winfo_exists():
+            if hasattr(self, "play_btn") and self.play_btn.winfo_exists() and self.detected_game:
                 self.play_btn.configure(fg_color=palette[step % len(palette)])
         except tk.TclError:
             return
@@ -949,6 +952,106 @@ class Loader(ctk.CTk if ctk else object):
         self.ui(self._refresh_account_label)
 
     # ---- uruchamianie -----------------------------------------------------------------------
+    # ---- wykrywanie już uruchomionego Minecrafta -------------------------------------------
+    def _schedule_game_detection(self):
+        if not self.winfo_exists():
+            return
+        if not self._detection_running:
+            self._detection_running = True
+            threading.Thread(target=self._detect_running_game_worker, daemon=True).start()
+        self.after(2500, self._schedule_game_detection)
+
+    @staticmethod
+    def _find_running_fabric_game():
+        """Find a running Java Minecraft process and verify its game directory and Fabric API."""
+        if os.name != "nt":
+            return None
+        script = ("$p = Get-CimInstance Win32_Process | Where-Object { "
+                  "$_.Name -in @('java.exe','javaw.exe') -and $_.CommandLine -match 'net\\.minecraft|fabric-loader' } "
+                  "| Select-Object ProcessId,CommandLine; $p | ConvertTo-Json -Compress")
+        try:
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                                    capture_output=True, text=True, timeout=5,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if result.returncode != 0 or not result.stdout.strip():
+                return None
+            data = json.loads(result.stdout.strip())
+            processes = data if isinstance(data, list) else [data]
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return None
+
+        for proc in processes:
+            command = proc.get("CommandLine") or ""
+            version_match = re.search(r"fabric-loader-[^\s\"]*-1\.21\.4", command, re.IGNORECASE)
+            if not version_match or "fabric-loader" not in command.lower():
+                continue
+            dir_match = re.search(r'--gameDir\s+"([^"]+)"|--gameDir\s+(\S+)', command, re.IGNORECASE)
+            game_dir = Path((dir_match.group(1) or dir_match.group(2)) if dir_match else (Path.home() / "AppData" / "Roaming" / ".minecraft"))
+            mods_dir = game_dir / "mods"
+            if not mods_dir.is_dir():
+                continue
+            fabric_api = next((p for p in mods_dir.glob("*.jar")
+                               if p.name.lower().startswith("fabric-api") or "fabric-api" in p.name.lower()), None)
+            if fabric_api:
+                return {"pid": int(proc.get("ProcessId") or 0), "game_dir": str(game_dir),
+                        "mods_dir": str(mods_dir), "fabric_api": fabric_api.name}
+        return None
+
+    def _detect_running_game_worker(self):
+        found = self._find_running_fabric_game()
+        def apply_result():
+            self._detection_running = False
+            if not self.winfo_exists():
+                return
+            self.detected_game = found
+            if found:
+                self.play_btn.configure(state="normal", fg_color=ORANGE, hover_color=ORANGE_H,
+                                        text_color="#101116", text="LOAD")
+                self.status.configure(text=f"Compatible game detected · PID {found['pid']} · Minecraft 1.21.4 Fabric + Fabric API")
+            else:
+                self.play_btn.configure(state="disabled", fg_color="#343b49", hover_color="#424b5d",
+                                        text_color="#aeb6c5", text="LOAD")
+                self.status.configure(text="Waiting for Minecraft 1.21.4 with Fabric and Fabric API in the mods folder…")
+        self.ui(apply_result)
+
+    def load_client(self):
+        game = self.detected_game
+        if not game:
+            return
+        key = self.license_key.get().strip()
+        if not key:
+            messagebox.showerror("License required", "Enter your Orange Client license key first.")
+            return
+        mods_dir = Path(game["mods_dir"])
+        installed_client = next((p for p in mods_dir.glob("*.jar")
+                                 if p.name.lower().startswith("orange-client")), None)
+        if not installed_client:
+            bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "client-mods" / MOD_JAR
+            if not bundled.is_file():
+                messagebox.showerror("Client missing", "The Orange Client mod file is missing from this loader build.")
+                return
+            messagebox.showinfo(
+                "Restart Minecraft required",
+                "The compatible game was found, but Orange Client is not installed in its mods folder.\n\n"
+                "A normal Fabric mod cannot be injected into an already-running Minecraft process by copying its JAR. "
+                "Install the client mod and restart Minecraft before using LOAD."
+            )
+            return
+        config_dir = Path(game["game_dir"]) / "config"
+        try:
+            config_dir.mkdir(parents=True, exist_ok=True)
+            (config_dir / "orangeclient_license.json").write_text(
+                json.dumps({"key": key}, ensure_ascii=False), encoding="utf-8")
+        except OSError as exc:
+            messagebox.showerror("Could not prepare client", str(exc))
+            return
+        messagebox.showinfo(
+            "Orange Client detected",
+            "Minecraft 1.21.4 Fabric and Fabric API are compatible, and the Orange Client JAR is present.\n\n"
+            "The license file has been updated. If Orange Client was already loaded, its license state may require "
+            "a refresh or game restart; LOAD does not inject new Java classes into a running JVM."
+        )
+
     def play(self):
         if self._busy:
             return
