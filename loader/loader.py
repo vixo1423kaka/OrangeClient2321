@@ -211,10 +211,8 @@ class Loader(ctk.CTk if ctk else object):
         self._drag_origin = None
         # Opaque, frameless launcher. Ask Windows DWM for rounded native window corners.
         self.configure(fg_color=BG)
-        try:
-            self.overrideredirect(True)
-        except tk.TclError:
-            self._borderless = False
+        # Keep a Windows-managed top-level window so taskbar and minimize work.
+        # The native caption is removed later; our custom titlebar stays visible.
         icon_path = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "orange.ico"
         try:
             if icon_path.is_file():
@@ -363,13 +361,16 @@ class Loader(ctk.CTk if ctk else object):
         self.status.pack(side="left", fill="x", expand=True)
 
     def _apply_taskbar_visibility(self):
-        """Keep the custom borderless window represented on the Windows taskbar."""
+        """Use a taskbar-managed HWND while hiding the native caption."""
         if os.name != "nt" or not self.winfo_exists():
             return
         try:
             hwnd = self.winfo_id()
             user32 = ctypes.windll.user32
+            GWL_STYLE = -16
             GWL_EXSTYLE = -20
+            WS_CAPTION = 0x00C00000
+            WS_THICKFRAME = 0x00040000
             WS_EX_APPWINDOW = 0x00040000
             WS_EX_TOOLWINDOW = 0x00000080
             SWP_NOSIZE = 0x0001
@@ -382,9 +383,11 @@ class Loader(ctk.CTk if ctk else object):
             get_long.argtypes = (ctypes.c_void_p, ctypes.c_int)
             set_long.restype = ctypes.c_ssize_t
             set_long.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.c_ssize_t)
-            style = get_long(hwnd, GWL_EXSTYLE)
-            style = (style | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW
-            set_long(hwnd, GWL_EXSTYLE, style)
+            # Keep normal Windows window management; remove only the native caption.
+            style = get_long(hwnd, GWL_STYLE)
+            set_long(hwnd, GWL_STYLE, style & ~WS_CAPTION & ~WS_THICKFRAME)
+            exstyle = get_long(hwnd, GWL_EXSTYLE)
+            set_long(hwnd, GWL_EXSTYLE, (exstyle | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW)
             user32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
                                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED)
         except (AttributeError, OSError, tk.TclError):
@@ -472,11 +475,8 @@ class Loader(ctk.CTk if ctk else object):
         self.destroy()
 
     def _window_minimize(self):
+        # Windows manages this HWND normally, so iconify minimizes to the taskbar.
         self.iconify()
-
-    def _restore_borderless(self, _event=None):
-        if self._borderless:
-            self.after(120, lambda: self.overrideredirect(True) if self.winfo_exists() else None)
 
     def _window_toggle_maximize(self):
         if not self._maximized:
