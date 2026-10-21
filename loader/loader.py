@@ -365,8 +365,10 @@ class Loader(ctk.CTk if ctk else object):
         if os.name != "nt" or not self.winfo_exists():
             return
         try:
-            hwnd = self.winfo_id()
             user32 = ctypes.windll.user32
+            # winfo_id can be Tk's client HWND; apply styles to the real top-level.
+            child_hwnd = self.winfo_id()
+            hwnd = user32.GetParent(child_hwnd) or child_hwnd
             GWL_STYLE = -16
             GWL_EXSTYLE = -20
             WS_CAPTION = 0x00C00000
