@@ -19,6 +19,8 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 
 /**
  * Port moda "Error Killer" (errorkiller 1.11.1 dla MC 1.21.4, autor: sigmapowazna, licencja MIT).
@@ -43,6 +45,7 @@ public class ErrorKiller extends Module {
     private int blockSlot = -1;
     private int fluidSlot = -1;
     private BlockHitResult target;
+    private BlockPos fluidPos;
 
     public ErrorKiller() {
         super("ErrorKiller", Category.PLAYER);
@@ -59,6 +62,7 @@ public class ErrorKiller extends Module {
         blockSlot = -1;
         fluidSlot = -1;
         target = null;
+        fluidPos = null;
     }
 
     /**
@@ -87,6 +91,7 @@ public class ErrorKiller extends Module {
         blockSlot = mc.player.getInventory().selectedSlot;
         fluidSlot = bucket;
         target = hit;
+        fluidPos = pos;
 
         // Krok 1: przelacz na wiadro i postaw plyn.
         switchTo(mc, fluidSlot);
@@ -115,17 +120,31 @@ public class ErrorKiller extends Module {
         }
 
         if (phase == 1) {
+            // Wait for the server to replace the button/lever cell with fluid.
+            if (fluidPos == null || mc.world.getFluidState(fluidPos).isEmpty()) {
+                cooldown = 1;
+                return;
+            }
             pickUp(mc);
             phase = 2;
             cooldown = Math.max(1, (int) delay.get());
         } else {
+            // Do not place the original block until the fluid source is gone.
+            if (fluidPos != null && !mc.world.getFluidState(fluidPos).isEmpty()) {
+                cooldown = 1;
+                return;
+            }
             placeBlock(mc);
         }
     }
 
     private void pickUp(MinecraftClient mc) {
         switchTo(mc, fluidSlot);
-        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+        if (fluidPos == null) return;
+        // Camera raycast may still hit the support block, so target the fluid cell directly.
+        BlockHitResult fluidHit = new BlockHitResult(
+                Vec3d.ofCenter(fluidPos), Direction.UP, fluidPos, false);
+        mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, fluidHit);
     }
 
     private void placeBlock(MinecraftClient mc) {
