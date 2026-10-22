@@ -33,12 +33,21 @@ jobs:
       - name: Inspect client payload
         shell: pwsh
         run: |
-          Get-ChildItem build/libs | Format-Table Name, Length
+          $sb = New-Object System.Text.StringBuilder
+          Get-ChildItem build -Recurse -Filter *.jar | ForEach-Object {
+            $e = @(jar tf $_.FullName)
+            $has = [bool]($e | Select-String "^com/example/orangeclient/OrangeClient.class$")
+            $rel = $_.FullName.Replace($PWD.Path, '')
+            [void]$sb.AppendLine("$rel bytes=$($_.Length) entries=$($e.Count) hasMain=$has")
+          }
+          $cls = (Get-ChildItem build/classes/java/main -Recurse -Filter *.class -ErrorAction SilentlyContinue | Measure-Object).Count
+          [void]$sb.AppendLine("compiled classes in build/classes/java/main: $cls")
+          [void]$sb.AppendLine("gradle: $(gradle --version | Select-String 'Gradle ')")
+          $msg = $sb.ToString().Replace('%','%25').Replace("`r",'').Replace("`n",'%0A')
+          Write-Host "::error title=payload-inspect::$msg"
           $inner = "build/libs/orange-client-inner-0.1.0.jar"
           if (!(Test-Path $inner)) { throw "Missing $inner" }
-          $entries = jar tf $inner
-          "Entries in ${inner}: $($entries.Count)"
-          $entries | Select-Object -First 25
+          $entries = @(jar tf $inner)
           if (!($entries | Select-String "^com/example/orangeclient/OrangeClient.class$")) {
             throw "OrangeClient.class missing from $inner ($((Get-Item $inner).Length) bytes)"
           }
