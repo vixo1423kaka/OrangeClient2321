@@ -344,7 +344,6 @@ class Loader(ctk.CTk if ctk else object):
         self.license_valid = False
         self.license_checking = False
         self.license_expiry = 0
-        self._auto_license_verify_pending = bool(self.license_key.get().strip())
         self.license_key.trace_add("write", lambda *_: self._license_key_changed())
         self.username.trace_add("write", lambda *_: self._persist())
         self._busy = False
@@ -699,47 +698,33 @@ class Loader(ctk.CTk if ctk else object):
         self.show_key.pack(side="left", padx=(12, 0))
         license_actions = ctk.CTkFrame(c, fg_color="transparent")
         license_actions.pack(fill="x", padx=16, pady=(0, 12))
-        self.verify_license_btn = ctk.CTkButton(
-            license_actions, text="Verify license", width=140, height=32,
-            fg_color=ORANGE, hover_color=ORANGE_H, text_color="#101116",
-            command=self._verify_license_clicked)
-        self.verify_license_btn.pack(side="left")
         self.license_status_label = ctk.CTkLabel(
-            license_actions, text="License not verified", text_color=MUTED,
-            font=("Segoe UI", 10), anchor="w", justify="left")
-        self.license_status_label.pack(side="left", padx=(12, 0), fill="x", expand=True)
+            license_actions, text="License is checked online when you press LOAD",
+            text_color=MUTED, font=("Segoe UI", 10), anchor="w", justify="left")
+        self.license_status_label.pack(side="left", fill="x", expand=True)
 
     def _license_key_changed(self):
         self.license_valid = False
         self.license_expiry = 0
         self._persist()
         if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
-            self.license_status_label.configure(text="Key changed — verify again", text_color=MUTED)
+            self.license_status_label.configure(
+                text="License will be checked online when you press LOAD", text_color=MUTED)
         self._update_load_button()
 
     def _verify_license_clicked(self):
         key = self.license_key.get().strip()
-        if not self.detected_game:
-            if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
-                self.license_status_label.configure(
-                    text="Start Minecraft 1.21.4 Fabric first", text_color=MUTED)
-            return
         if not key:
             self.license_valid = False
             self._update_load_button()
             if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
                 self.license_status_label.configure(text="Enter a license key first", text_color=RED)
             return
-        if self.license_checking:
+        if not self.detected_game:
+            if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
+                self.license_status_label.configure(text="Start Minecraft 1.21.4 Fabric first", text_color=MUTED)
             return
-        self.license_checking = True
-        if hasattr(self, "verify_license_btn") and self.verify_license_btn.winfo_exists():
-            self.verify_license_btn.configure(state="disabled", text="Checking…")
-        if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
-            self.license_status_label.configure(text="Contacting license server…", text_color=MUTED)
-        self._update_load_button()
-        java_executable = self.detected_game.get("java_executable", "")
-        threading.Thread(target=self._verify_license_worker, args=(key, java_executable), daemon=True).start()
+        self.load_client()
 
     def _verify_license_worker(self, key, java_executable):
         try:
@@ -749,8 +734,6 @@ class Loader(ctk.CTk if ctk else object):
             result, error = None, str(exc)
         def apply():
             self.license_checking = False
-            if hasattr(self, "verify_license_btn") and self.verify_license_btn.winfo_exists():
-                self.verify_license_btn.configure(state="normal", text="Verify license")
             if key != self.license_key.get().strip():
                 return
             self.license_valid = result is not None
@@ -770,7 +753,7 @@ class Loader(ctk.CTk if ctk else object):
     def _update_load_button(self):
         if not hasattr(self, "play_btn") or not self.play_btn.winfo_exists():
             return
-        can_load = bool(self.detected_game and self.license_valid and not self.license_checking)
+        can_load = bool(self.detected_game and self.license_key.get().strip() and not self._busy and not self.license_checking)
         if can_load:
             self.play_btn.configure(state="normal", fg_color=ORANGE, hover_color=ORANGE_H,
                                     text_color="#101116", text="LOAD")
@@ -1239,9 +1222,6 @@ class Loader(ctk.CTk if ctk else object):
             self._update_load_button()
             if found:
                 self.status.configure(text=f"Compatible game detected · PID {found['pid']} · Minecraft 1.21.4 Fabric + Fabric API")
-                if self._auto_license_verify_pending:
-                    self._auto_license_verify_pending = False
-                    self.after(100, self._verify_license_clicked)
             elif not self.license_valid:
                 self.status.configure(text="Enter and verify a valid license, then start Minecraft 1.21.4 Fabric.")
             else:
