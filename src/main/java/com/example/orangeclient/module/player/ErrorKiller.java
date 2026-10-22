@@ -27,12 +27,12 @@ import net.minecraft.util.math.BlockPos;
  * tripwire), mod stawia tam wode, zbiera ja z powrotem, a na koncu stawia twoj blok.
  *
  * Delay:
- *   0 = wszystko w jednym ticku (zachowanie oryginalnego moda, najszybciej)
+ *   0 = minimalna przerwa jednego ticku (serwer musi zdazyc przetworzyc postawienie plynu)
  *   1-3 = przerwa w tickach miedzy krokami (wolniej, ale stabilniej na serwerze)
  */
 public class ErrorKiller extends Module {
     /** Przerwa miedzy krokami w tickach: 0 = od razu, 3 = najwolniej. */
-    private final NumberSetting delay = add(new NumberSetting("Delay", 0, 0, 3, 1));
+    private final NumberSetting delay = add(new NumberSetting("Delay", 1, 0, 3, 1));
 
     private static Class<?> targetClass;
     private static boolean targetResolved;
@@ -92,15 +92,11 @@ public class ErrorKiller extends Module {
         switchTo(mc, fluidSlot);
         mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
 
-        int d = (int) delay.get();
-        if (d <= 0) {
-            // Delay 0: robimy wszystko od razu, tak jak oryginalny mod.
-            pickUp(mc);
-            placeBlock(mc);
-        } else {
-            phase = 1;
-            cooldown = d;
-        }
+        // Nie zbieraj plynu w tym samym ticku, w ktorym zostal postawiony.
+        // Interakcje ida do serwera asynchronicznie; natychmiastowe postawienie i
+        // zebranie w jednym ticku czesto powoduje, ze kolejne akcje nie trafiaja.
+        phase = 1;
+        cooldown = Math.max(1, (int) delay.get());
         return true;
     }
 
@@ -119,7 +115,7 @@ public class ErrorKiller extends Module {
         if (phase == 1) {
             pickUp(mc);
             phase = 2;
-            cooldown = (int) delay.get();
+            cooldown = Math.max(1, (int) delay.get());
         } else {
             placeBlock(mc);
         }
