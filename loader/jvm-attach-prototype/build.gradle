@@ -16,8 +16,10 @@ tasks.withType(JavaCompile).configureEach {
     options.compilerArgs += ['--add-modules', 'jdk.attach']
 }
 
+def clientJar = rootProject.file('../../build/libs/orange-client-inner-0.1.0.jar')
+
 jar {
-    archiveBaseName = 'jvm-attach-prototype'
+    archiveBaseName = 'orange-client-launcher'
     manifest {
         attributes(
             'Main-Class': 'com.example.attach.Launcher',
@@ -25,5 +27,13 @@ jar {
             'Can-Redefine-Classes': 'false',
             'Can-Retransform-Classes': 'false'
         )
+    }
+    // The real Fabric mod is bundled as a resource for the install step.
+    // It is not dynamically loaded by the diagnostic Java agent.
+    if (clientJar.exists()) {
+        from(clientJar) {
+            into 'payload'
+            rename { 'orange-client-inner-0.1.0.jar' }
+        }
     }
 }
