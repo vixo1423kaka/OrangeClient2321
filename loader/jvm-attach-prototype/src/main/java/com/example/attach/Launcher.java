@@ -158,7 +158,7 @@ public final class Launcher {
                     + "and run both under the same Windows user.";
             showError(message);
         } finally {
-            java.util.Arrays.fill(license, '\\0');
+            java.util.Arrays.fill(license, '\0');
             licenseField.setText("");
         }
     }
