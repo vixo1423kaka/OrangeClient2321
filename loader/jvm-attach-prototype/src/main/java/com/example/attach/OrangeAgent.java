@@ -62,7 +62,22 @@ public final class OrangeAgent {
                 Path jar = extractPayload();
                 addToKnot(launcherBase, game, jar);
 
-                Class<?> main = Class.forName(CLIENT_MAIN, true, game);
+                Class<?> main;
+                try {
+                    main = Class.forName(CLIENT_MAIN, true, game);
+                } catch (ClassNotFoundException notVisible) {
+                    // If Knot's existing loader cannot see the newly added JAR, use a child
+                    // loader with the live game loader as parent for Minecraft/Fabric classes.
+                    URL payloadUrl = jar.toUri().toURL();
+                    java.net.URLClassLoader payloadLoader = new java.net.URLClassLoader(new URL[] { payloadUrl }, game);
+                    try {
+                        main = Class.forName(CLIENT_MAIN, true, payloadLoader);
+                        log("OrangeClient loaded through payload child classloader");
+                    } catch (ClassNotFoundException absent) {
+                        absent.addSuppressed(notVisible);
+                        throw new ClassNotFoundException(CLIENT_MAIN + " not found in extracted payload " + jar, absent);
+                    }
+                }
                 Object instance = main.getDeclaredConstructor().newInstance();
                 Method init = main.getMethod("onInitializeClient");
                 Executor gameThread = (Executor) findMinecraftInstance(mc);
