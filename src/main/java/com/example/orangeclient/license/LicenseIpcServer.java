@@ -107,7 +107,11 @@ public final class LicenseIpcServer {
             }
 
             MinecraftClient.getInstance().execute(LicenseScreen::closeIfShowing);
-            respond(exchange, 200, true, "Orange Client activated");
+            long daysRemaining = LicenseManager.getDaysRemaining();
+            String message = daysRemaining >= 0
+                    ? "Orange Client activated; " + daysRemaining + " day(s) remaining"
+                    : "Orange Client activated; license has no reported expiry";
+            respond(exchange, 200, true, message);
         }
     }
 
