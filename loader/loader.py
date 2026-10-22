@@ -56,114 +56,6 @@ REDIRECT_PORT = 28487
 REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}"
 
 
-LICENSE_API_URL = "https://Vixo.pythonanywhere.com/validate"
-LICENSE_PUBLIC_KEY_X509_B64 = "MCowBQYDK2VwAyEANxglvfaj6XgHv5WSoPncL+woXMcO8Kj9WdlLhUhhEGE="
-MAX_LICENSE_TOKEN_SECONDS = 300
-
-
-def _sha256_hex(value: str) -> str:
-    import hashlib
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def _license_hwid(java_executable: str | None = None) -> str:
-    """Get the same fingerprint as LicenseManager.hwid() using the running game's JVM."""
-    import tempfile
-
-    if not java_executable:
-        raise ValueError("Uruchom Minecrafta przed weryfikacją licencji, aby odczytać parametry jego JVM.")
-    executable = Path(java_executable)
-    if executable.name.lower() == "javaw.exe":
-        console_java = executable.with_name("java.exe")
-        if console_java.is_file():
-            executable = console_java
-    if not executable.is_file():
-        raise ValueError("Nie udało się znaleźć pliku Java używanego przez Minecrafta.")
-    source = """
-public class OrangeHwidProbe {
-    public static void main(String[] args) {
-        System.out.println(System.getProperty("user.name"));
-        System.out.println(System.getProperty("os.name"));
-        System.out.println(System.getProperty("os.arch"));
-        System.out.println(Runtime.getRuntime().availableProcessors());
-    }
-}
-"""
-    try:
-        with tempfile.TemporaryDirectory(prefix="orange-hwid-") as temp:
-            java_file = Path(temp) / "OrangeHwidProbe.java"
-            java_file.write_text(source, encoding="utf-8")
-            result = subprocess.run(
-                [str(executable), str(java_file)], capture_output=True, text=True,
-                timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                errors="replace")
-        values = result.stdout.strip().splitlines()
-        if result.returncode != 0 or len(values) < 4:
-            raise ValueError("Java nie zwróciła parametrów potrzebnych do weryfikacji licencji.")
-        user_name, os_name, os_arch, cpu_count = values[:4]
-        raw = (user_name + os_name + os_arch + os.environ.get("COMPUTERNAME", "")
-               + os.environ.get("PROCESSOR_IDENTIFIER", "") + cpu_count)
-        return _sha256_hex(raw)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise ValueError("Nie można odczytać parametrów JVM Minecrafta: " + str(exc)) from exc
-
-def validate_license_online(key: str, java_executable: str | None = None) -> dict:
-    """Validate a key against the signed-token API used by the Fabric mod."""
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.exceptions import InvalidSignature
-    import base64
-    import hashlib
-    import time
-
-    key = (key or "").strip()
-    if not key:
-        raise ValueError("Wpisz klucz licencji.")
-    machine_id = _license_hwid(java_executable)
-    body = json.dumps({"key": key, "hwid": machine_id}, separators=(",", ":")).encode("utf-8")
-    request = urllib.request.Request(
-        LICENSE_API_URL, data=body, method="POST",
-        headers={"Content-Type": "application/json", "User-Agent": "OrangeClientLoader/1.3"})
-    try:
-        with urllib.request.urlopen(request, timeout=12) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        try:
-            data = json.loads(exc.read().decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
-            data = {}
-        raise ValueError(data.get("message") or "Serwer odrzucił licencję (HTTP %s)." % exc.code)
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
-        raise ValueError("Nie można połączyć się z serwerem licencji: " + str(exc))
-
-    if not isinstance(data, dict) or data.get("valid") is not True:
-        raise ValueError((data.get("message") if isinstance(data, dict) else None) or "Licencja jest nieaktywna lub nieważna.")
-    token, signature = data.get("token"), data.get("signature")
-    if not isinstance(token, str) or not isinstance(signature, str):
-        raise ValueError("Serwer nie zwrócił podpisanego tokenu licencji.")
-    try:
-        raw_token = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
-        raw_signature = base64.urlsafe_b64decode(signature + "=" * (-len(signature) % 4))
-        public_key = serialization.load_der_public_key(base64.b64decode(LICENSE_PUBLIC_KEY_X509_B64))
-        public_key.verify(raw_signature, raw_token)
-        claims = json.loads(raw_token.decode("utf-8"))
-        now = int(time.time())
-        token_iat, token_exp = int(claims["iat"]), int(claims["exp"])
-        license_exp = int(claims["license_exp"])
-        hwid_hash = hashlib.sha256(machine_id.encode("utf-8")).hexdigest()
-        key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
-        if (claims.get("v") != 1 or token_iat > now + 60 or token_exp <= now
-                or token_exp <= token_iat or token_exp - token_iat > MAX_LICENSE_TOKEN_SECONDS
-                or (license_exp > 0 and license_exp <= now)
-                or key_hash != claims.get("key_hash") or hwid_hash != claims.get("hwid_hash")):
-            raise ValueError("Token licencji wygasł lub nie pasuje do tego urządzenia.")
-    except InvalidSignature:
-        raise ValueError("Nieprawidłowy podpis serwera licencji.")
-    except (KeyError, TypeError, UnicodeDecodeError) as exc:
-        raise ValueError("Nie można zweryfikować tokenu licencji.") from exc
-    return {"expires_at": int(claims["license_exp"]), "token_expires_at": int(claims["exp"])}
-
-
-
 BG, SIDE, PANEL, BORDER = "#0b0d12", "#10141c", "#151b26", "#242c3b"
 TEXT, MUTED, ORANGE, ORANGE_H = "#f2f4f8", "#8691a6", "#f47c20", "#ff963f"
 GREEN, RED = "#69d69a", "#ff6b6b"
@@ -753,7 +645,7 @@ class Loader(ctk.CTk if ctk else object):
     def _update_load_button(self):
         if not hasattr(self, "play_btn") or not self.play_btn.winfo_exists():
             return
-        can_load = bool(self.detected_game and self.license_key.get().strip() and not self._busy and not self.license_checking)
+        can_load = bool(self.detected_game and self.license_key.get().strip() and not self._busy)
         if can_load:
             self.play_btn.configure(state="normal", fg_color=ORANGE, hover_color=ORANGE_H,
                                     text_color="#101116", text="LOAD")
@@ -1238,80 +1130,104 @@ class Loader(ctk.CTk if ctk else object):
             return
         if self._busy:
             return
+
+        # The first LOAD installs the bundled bootstrap only. The license clock is not
+        # touched until the bootstrap is running and the user activates it from LOAD.
+        ipc_file = Path(game["game_dir"]) / "config" / "orangeclient_ipc.json"
+        if not ipc_file.is_file():
+            self._install_bootstrap(game)
+            return
+
         self._busy = True
-        self.play_btn.configure(state="disabled", text="CHECKING LICENSE…")
-        self._set_status("Revalidating license before LOAD…")
-        threading.Thread(target=self._load_after_license_check, args=(game, key), daemon=True).start()
+        self._update_load_button()
+        self._set_status("Sending activation request to the running Minecraft…")
+        threading.Thread(target=self._activate_running_client, args=(game, key), daemon=True).start()
 
-    def _load_after_license_check(self, game, key):
-        try:
-            validate_license_online(key, game.get("java_executable", ""))
-        except Exception as exc:
-            message = str(exc)
-            self.ui(lambda: messagebox.showerror("License rejected", message))
-            self._set_status("LOAD blocked: license validation failed.")
-            self.ui(lambda: (setattr(self, "_busy", False), self._update_load_button()))
-            return
-        def continue_load():
-            if key != self.license_key.get().strip():
-                self._busy = False
-                self._set_status("LOAD cancelled because the license key changed.")
-                self._update_load_button()
-                return
-            self.license_valid = True
-            self._busy = False
-            self._update_load_button()
-            self._finish_load_client(game, key)
-        self.ui(continue_load)
-
-    def _finish_load_client(self, game, key):
+    def _install_bootstrap(self, game):
         mods_dir = Path(game["mods_dir"])
-        installed_client = next((p for p in mods_dir.glob("*.jar")
-                                 if p.name.lower().startswith("orange-client")), None)
-        if not installed_client:
-            bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "client-mods" / MOD_JAR
-            if not bundled.is_file():
-                messagebox.showerror(
-                    "Client file missing",
-                    "This loader build does not contain the Orange Client mod file. Download the latest "
-                    "OrangeClientLoader.exe build from GitHub Actions, or place "
-                    + MOD_JAR + " in the loader's client-mods folder."
-                )
-                return
-            try:
-                mods_dir.mkdir(parents=True, exist_ok=True)
-                installed_client = mods_dir / MOD_JAR
-                shutil.copy2(bundled, installed_client)
-            except OSError as exc:
-                messagebox.showerror(
-                    "Could not install client",
-                    "The loader found the bundled client but could not copy it into this Modrinth profile's mods folder.\n\n"
-                    + str(exc)
-                )
-                return
-            messagebox.showinfo(
-                "Orange Client installed",
-                "Orange Client was copied into this Modrinth profile's mods folder:\n\n"
-                + str(installed_client)
-                + "\n\nMinecraft has already started, so Fabric cannot load a new mod into this session. "
-                "Close Minecraft completely and launch the same 1.21.4 Fabric profile again. "
-                "Then reopen the loader and press LOAD."
-            )
+        bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "client-mods" / MOD_JAR
+        if not bundled.is_file():
+            messagebox.showerror(
+                "Bootstrap missing",
+                "This loader build does not contain the Orange Client bootstrap. "
+                "Download the latest OrangeClientLoader.exe build from GitHub Actions.")
             return
-        config_dir = Path(game["game_dir"]) / "config"
         try:
-            config_dir.mkdir(parents=True, exist_ok=True)
-            (config_dir / "orangeclient_license.json").write_text(
-                json.dumps({"key": key}, ensure_ascii=False), encoding="utf-8")
+            mods_dir.mkdir(parents=True, exist_ok=True)
+            existing = next((p for p in mods_dir.glob("*.jar")
+                             if p.name.lower().startswith("orange-client")), None)
+            if existing:
+                backup_dir = Path(game["game_dir"]) / "config" / "orangeclient-backup"
+                backup_dir.mkdir(parents=True, exist_ok=True)
+                backup = backup_dir / existing.name
+                if backup.exists():
+                    import time
+                    backup = backup_dir / (existing.stem + "-" + str(int(time.time())) + existing.suffix)
+                shutil.move(str(existing), str(backup))
+            target = mods_dir / MOD_JAR
+            shutil.copy2(bundled, target)
         except OSError as exc:
-            messagebox.showerror("Could not prepare client", str(exc))
+            messagebox.showerror("Could not install bootstrap", str(exc))
             return
         messagebox.showinfo(
-            "Orange Client detected",
-            "Minecraft 1.21.4 Fabric and Fabric API are compatible, and the Orange Client JAR is present.\n\n"
-            "The license file has been updated. If Orange Client was already loaded, its license state may require "
-            "a refresh or game restart; LOAD does not inject new Java classes into a running JVM."
-        )
+            "One-time setup required",
+            "Orange Client bootstrap was installed into this Minecraft profile.\n\n"
+            "Close Minecraft completely and start the same Fabric 1.21.4 profile once. "
+            "This one-time restart is required because Fabric loads mods at game startup. "
+            "After that, press LOAD to activate Orange Client in the already-running game. "
+            "Your license has not been activated by this installation step.")
+        self._set_status("Bootstrap installed. Restart Minecraft once, then press LOAD.")
+
+    def _activate_running_client(self, game, key):
+        try:
+            endpoint_file = Path(game["game_dir"]) / "config" / "orangeclient_ipc.json"
+            endpoint = json.loads(endpoint_file.read_text(encoding="utf-8"))
+            port = int(endpoint.get("port", 0))
+            secret = endpoint.get("token", "")
+            if not (1 <= port <= 65535) or not isinstance(secret, str) or len(secret) < 32:
+                raise RuntimeError("Invalid local activation endpoint. Restart Minecraft and try again.")
+            body = json.dumps({"key": key}, separators=(",", ":")).encode("utf-8")
+            request = urllib.request.Request(
+                "http://127.0.0.1:%d/activate" % port,
+                data=body,
+                method="POST",
+                headers={"Content-Type": "application/json", "X-Orange-Token": secret,
+                         "User-Agent": "OrangeClientLoader/1.3"})
+            with urllib.request.urlopen(request, timeout=18) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            if not isinstance(result, dict) or result.get("ok") is not True:
+                raise RuntimeError(result.get("message", "License activation failed.")
+                                   if isinstance(result, dict) else "Invalid response from Minecraft.")
+            message = result.get("message", "Orange Client activated.")
+            self.ui(lambda: self._activation_succeeded(message))
+        except urllib.error.HTTPError as exc:
+            try:
+                result = json.loads(exc.read().decode("utf-8"))
+                detail = result.get("message", "License rejected.") if isinstance(result, dict) else "License rejected."
+            except Exception:
+                detail = "License rejected (HTTP %d)." % exc.code
+            self.ui(lambda: self._activation_failed(detail))
+        except Exception as exc:
+            detail = str(exc)
+            self.ui(lambda: self._activation_failed(detail))
+
+    def _activation_succeeded(self, message):
+        self._busy = False
+        self.license_valid = True
+        if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
+            self.license_status_label.configure(text="License active · " + message, text_color=GREEN)
+        self._set_status("Orange Client activated in the running Minecraft session.")
+        self._update_load_button()
+        messagebox.showinfo("Orange Client", "License accepted. " + message)
+
+    def _activation_failed(self, message):
+        self._busy = False
+        self.license_valid = False
+        if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
+            self.license_status_label.configure(text=message, text_color=RED)
+        self._set_status("Activation failed: " + message)
+        self._update_load_button()
+        messagebox.showerror("Orange Client activation failed", message)
 
     def play(self):
         if self._busy:
