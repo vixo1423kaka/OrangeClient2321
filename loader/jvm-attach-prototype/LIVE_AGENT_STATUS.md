@@ -1,21 +1,12 @@
-# Live-agent migration status (Minecraft Java 1.21.4)
+# Live agent status (Minecraft 1.21.4, Fabric)
 
-## Implemented in this stage
-- An explicit Java instrumentation entrypoint supports both `premain` and `agentmain`.
-- The agent records Java/runtime details and attempts to identify the already-loaded Minecraft client class and its defining classloader.
-- The report is appended to `%TEMP%/orange-jvm-agent.log` on Windows (the JVM temp directory on other systems).
-- Discovery-only behavior is deliberate; a diagnostic agent must not claim that it has initialized Orange Client.
+Implemented: the agent finds the game's Knot classloader, adds the bundled client jar to its class path,
+runs `OrangeClient.onInitializeClient()` on the game thread and validates the license key through
+`LicenseManager.validate`. The launcher shows the real result (`%TEMP%/orange-agent-result.txt`).
 
-## Not implemented / not yet verified
-1. **Orange Client bootstrap:** the current `OrangeClient` implements `ClientModInitializer` and imports Fabric API types. Reflectively invoking it without Fabric's runtime is not a supported bootstrap path.
-2. **Tick/render/HUD hooks:** the existing implementation registers Fabric API callbacks. These need a separate hook adapter with a defined lifecycle and thread-safety rules.
-3. **Mixin replacements:** the client references mixins and accessors for game internals. Each must be mapped to the exact 1.21.4 runtime names and replaced with verified instrumentation transformations or redesigned to avoid private internals. This agent currently installs no transformers.
-4. **Runtime test:** a successful Java compilation or agent attachment is not proof that the game GUI, HUD, or modules work. The test must run against a real 1.21.4 client and record initialization, GUI, tick, render, and module outcomes.
-
-## Safe next milestones
-- Inventory every Fabric API call and every mixin/accessor, and classify each by replacement strategy.
-- Implement a dedicated, version-pinned bootstrap that does not call Fabric entrypoints.
-- Add narrowly scoped bytecode transformations with class-name/version guards and fail-closed diagnostics.
-- Run a reproducible client test on Java 21 and keep the logs/artifact with the CI result.
-
-Do not distribute this stage as a functioning hot-loader. It is the instrumentation/discovery foundation only.
+Known limits (untested against a real game in CI - run it and check the log):
+- Mixins only apply when a class is first loaded, so the 22 mixins/accessors cannot be applied to a running game.
+  Modules using them (KillAura swing/rotation parts, Freecam, FastPlace/FastBreak, NoJumpDelay, HandAnimations,
+  Chams, AutoDripstone...) can throw ClassCastException or stay inactive. Needs a guard or an accessor-free rewrite.
+- Fabric resource packs are registered at startup, so `orangeclient` fonts/textures are not found (fallback font, no logo).
+- Requires Fabric Loader + Fabric API in the target game.
