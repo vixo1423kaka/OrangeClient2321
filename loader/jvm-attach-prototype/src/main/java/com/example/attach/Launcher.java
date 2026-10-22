@@ -123,7 +123,7 @@ public final class Launcher {
         } catch (Throwable ex) {
             showError(ex.getClass().getSimpleName() + ": " + ex.getMessage());
         } finally {
-            Arrays.fill(license, '\\0');
+            Arrays.fill(license, '\0');
             licenseField.setText("");
         }
     }
