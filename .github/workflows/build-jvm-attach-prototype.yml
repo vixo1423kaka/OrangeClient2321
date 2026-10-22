@@ -61,6 +61,15 @@ jobs:
           if (!($entries | Select-String "^com/example/orangeclient/OrangeClient.class$")) {
             throw "OrangeClient.class missing from $inner ($((Get-Item $inner).Length) bytes)"
           }
+      - name: Build installable Fabric mod bundle (mixins load at game startup)
+        shell: pwsh
+        run: |
+          .\gradlew.bat bootstrapJar --no-daemon
+          $jar = "build/libs/orange-client-0.1.0.jar"
+          if (!(Test-Path $jar)) { throw "Installable Fabric mod bundle was not produced: $jar" }
+          $entries = @(jar tf $jar)
+          if (!($entries | Select-String "^fabric.mod.json$")) { throw "fabric.mod.json missing from installable bundle" }
+          if (!($entries | Select-String "^META-INF/jars/orange-client-0.1.0.jar$")) { throw "Nested client mod missing from installable bundle" }
       - name: Build launcher with bundled client payload
         working-directory: loader/jvm-attach-prototype
         run: gradle clean jar
@@ -72,6 +81,12 @@ jobs:
           $entries = jar tf $jar
           if (!($entries | Select-String "^com/example/attach/Launcher.class$")) { throw "Launcher class missing" }
           if (!($entries | Select-String "^payload/orange-client-inner-0.1.0.jar$")) { throw "Bundled Orange Client payload missing" }
+      - name: Upload installable Fabric mod bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Orange-Client-Fabric-Mod
+          path: build/libs/orange-client-0.1.0.jar
+          if-no-files-found: error
       - name: Upload launcher JAR
         uses: actions/upload-artifact@v4
         with:
