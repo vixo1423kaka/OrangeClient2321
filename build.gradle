@@ -33,9 +33,13 @@ java {
 
 // A single installable bootstrap bundles the actual client as a nested Fabric mod.
 // This avoids asking users to place the Orange Client JAR separately in their mods folder.
+tasks.named('remapJar', Jar) {
+    archiveBaseName.set('orange-client-inner')
+}
+
 tasks.register('bootstrapJar', Jar) {
     dependsOn tasks.named('remapJar')
-    archiveBaseName.set('orange-client-bootstrap')
+    archiveBaseName.set('orange-client')
     archiveVersion.set(project.version.toString())
     destinationDirectory.set(layout.buildDirectory.dir('libs'))
     from('src/bootstrap/resources') {
@@ -45,4 +49,9 @@ tasks.register('bootstrapJar', Jar) {
         into 'META-INF/jars'
         rename { "orange-client-${project.version}.jar" }
     }
+}
+
+// Keep the existing CI packaging path, but make that artifact the single bootstrap bundle.
+tasks.named('build') {
+    finalizedBy tasks.named('bootstrapJar')
 }
