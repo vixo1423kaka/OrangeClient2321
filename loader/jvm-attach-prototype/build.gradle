@@ -16,9 +16,11 @@ tasks.withType(JavaCompile).configureEach {
     options.compilerArgs += ['--add-modules', 'jdk.attach']
 }
 
-def clientJar = rootProject.file('../../build/libs/orange-client-inner-0.1.0.jar')
+// Resolve from the repository root, not two directories above it.
+def clientJar = rootProject.file('build/libs/orange-client-inner-0.1.0.jar')
 
-jar {
+tasks.named('jar') {
+    dependsOn rootProject.tasks.named('remapJar')
     archiveBaseName = 'orange-client-launcher'
     manifest {
         attributes(
@@ -29,12 +31,14 @@ jar {
             'Can-Retransform-Classes': 'false'
         )
     }
-    // The real Fabric mod is bundled as a resource for the install step.
-    // It is not dynamically loaded by the diagnostic Java agent.
-    if (clientJar.exists()) {
-        from(clientJar) {
-            into 'payload'
-            rename { 'orange-client-inner-0.1.0.jar' }
+    // Bundle the actual remapped Fabric mod into the launcher JAR.
+    doFirst {
+        if (!clientJar.isFile()) {
+            throw new GradleException("OrangeClient payload missing: ${clientJar}. Build the root remapJar task first.")
         }
+    }
+    from(clientJar) {
+        into 'payload'
+        rename { 'orange-client-inner-0.1.0.jar' }
     }
 }
