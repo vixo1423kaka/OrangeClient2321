@@ -234,7 +234,6 @@ class Loader(ctk.CTk if ctk else object):
         self.username = tk.StringVar(value=s.get("username", "Player"))
         self.license_key = tk.StringVar(value=s.get("license_key", "") or self._key_from_instances())
         self.license_valid = False
-        self.license_checking = False
         self.license_expiry = 0
         self.license_key.trace_add("write", lambda *_: self._license_key_changed())
         self.username.trace_add("write", lambda *_: self._persist())
@@ -603,44 +602,6 @@ class Loader(ctk.CTk if ctk else object):
             self.license_status_label.configure(
                 text="License will be checked online when you press LOAD", text_color=MUTED)
         self._update_load_button()
-
-    def _verify_license_clicked(self):
-        key = self.license_key.get().strip()
-        if not key:
-            self.license_valid = False
-            self._update_load_button()
-            if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
-                self.license_status_label.configure(text="Enter a license key first", text_color=RED)
-            return
-        if not self.detected_game:
-            if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
-                self.license_status_label.configure(text="Start Minecraft 1.21.4 Fabric first", text_color=MUTED)
-            return
-        self.load_client()
-
-    def _verify_license_worker(self, key, java_executable):
-        try:
-            result = validate_license_online(key, java_executable)
-            error = None
-        except Exception as exc:
-            result, error = None, str(exc)
-        def apply():
-            self.license_checking = False
-            if key != self.license_key.get().strip():
-                return
-            self.license_valid = result is not None
-            self.license_expiry = int(result.get("expires_at", 0)) if result else 0
-            if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
-                if error:
-                    self.license_status_label.configure(text=error, text_color=RED)
-                elif self.license_expiry > 0:
-                    from datetime import datetime
-                    expiry_text = datetime.fromtimestamp(self.license_expiry).strftime("%Y-%m-%d %H:%M")
-                    self.license_status_label.configure(text="Active · expires " + expiry_text, text_color=GREEN)
-                else:
-                    self.license_status_label.configure(text="License active · no expiry reported", text_color=GREEN)
-            self._update_load_button()
-        self.ui(apply)
 
     def _update_load_button(self):
         if not hasattr(self, "play_btn") or not self.play_btn.winfo_exists():
