@@ -1094,8 +1094,7 @@ class Loader(ctk.CTk if ctk else object):
 
         # The first LOAD installs the bundled bootstrap only. The license clock is not
         # touched until the bootstrap is running and the user activates it from LOAD.
-        ipc_file = Path(game["game_dir"]) / "config" / "orangeclient_ipc.json"
-        if not ipc_file.is_file():
+        if not self._ipc_endpoint_ready(game):
             self._install_bootstrap(game)
             return
 
@@ -1103,6 +1102,18 @@ class Loader(ctk.CTk if ctk else object):
         self._update_load_button()
         self._set_status("Sending activation request to the running Minecraft…")
         threading.Thread(target=self._activate_running_client, args=(game, key), daemon=True).start()
+
+    @staticmethod
+    def _ipc_endpoint_ready(game):
+        endpoint_file = Path(game["game_dir"]) / "config" / "orangeclient_ipc.json"
+        try:
+            endpoint = json.loads(endpoint_file.read_text(encoding="utf-8"))
+            return (int(endpoint.get("pid", -1)) == int(game.get("pid", 0))
+                    and 1 <= int(endpoint.get("port", 0)) <= 65535
+                    and isinstance(endpoint.get("token"), str)
+                    and len(endpoint["token"]) >= 32)
+        except (OSError, ValueError, TypeError):
+            return False
 
     def _install_bootstrap(self, game):
         mods_dir = Path(game["mods_dir"])
@@ -1145,7 +1156,8 @@ class Loader(ctk.CTk if ctk else object):
             endpoint = json.loads(endpoint_file.read_text(encoding="utf-8"))
             port = int(endpoint.get("port", 0))
             secret = endpoint.get("token", "")
-            if not (1 <= port <= 65535) or not isinstance(secret, str) or len(secret) < 32:
+            if (int(endpoint.get("pid", -1)) != int(game.get("pid", 0))
+                    or not (1 <= port <= 65535) or not isinstance(secret, str) or len(secret) < 32):
                 raise RuntimeError("Invalid local activation endpoint. Restart Minecraft and try again.")
             body = json.dumps({"key": key}, separators=(",", ":")).encode("utf-8")
             request = urllib.request.Request(
