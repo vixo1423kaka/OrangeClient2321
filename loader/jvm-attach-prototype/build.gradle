@@ -1,0 +1,27 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.example.orangeclient'
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+}
+
+jar {
+    archiveBaseName = 'jvm-attach-prototype'
+    manifest {
+        attributes(
+            'Agent-Class': 'com.example.attach.DiagnosticAgent',
+            'Can-Redefine-Classes': 'false',
+            'Can-Retransform-Classes': 'false'
+        )
+    }
+}
