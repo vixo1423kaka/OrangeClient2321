@@ -35,3 +35,12 @@ Loader używa własnej aplikacji OAuth i nie pobiera tokenów z innych launcher�
 Bez Client ID przycisk logowania Microsoft poprosi o konfigurację, ale zakładki Gra/Mody i tryb offline pozostają dostępne.
 
 Tryb offline nie jest kontem premium i nie zapewnia uwierzytelniania na serwerach wymagających prawdziwego konta Microsoft/Minecraft.
+
+
+## Weryfikacja licencji w loaderze
+
+Zakładka Play zawiera pole klucza i przycisk **Verify license**. Po wykryciu uruchomionego Minecrafta 1.21.4 + Fabric loader wysyła klucz i odcisk JVM do istniejącego endpointu licencji, weryfikuje podpis Ed25519 tokenu oraz jego terminy i wiązanie z urządzeniem. Przycisk **LOAD** pozostaje zablokowany bez poprawnej weryfikacji i ponownie sprawdza licencję tuż przed wykonaniem akcji.
+
+Weryfikacja używa tego samego endpointu i klucza publicznego co `LicenseManager.java`; prywatny klucz podpisujący nie znajduje się w loaderze. Endpoint musi zwracać `valid`, `token`, `signature` i roszczenia tokenu `iat`, `exp`, `license_exp`, `key_hash`, `hwid_hash`. Zegar i czas rozpoczęcia licencji pozostają odpowiedzialnością serwera.
+
+**Ograniczenie:** to wdraża sprawdzanie licencji i blokadę przycisku, nie wstrzykiwanie kodu do już uruchomionej gry. Obecny kod Orange Client używa mixinów Fabric, które muszą być przygotowane przy starcie JVM; jeśli JAR klienta nie był załadowany przy starcie, samo kliknięcie LOAD nie może dołączyć jego mixinów do istniejącej sesji. Tę część trzeba rozwiązać osobnym bootstrapem i przetestować oddzielnie.
