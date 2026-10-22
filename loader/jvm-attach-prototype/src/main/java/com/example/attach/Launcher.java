@@ -155,7 +155,7 @@ public final class Launcher {
         } catch (Throwable ex) {
             String message = ex.getClass().getSimpleName() + ": " + ex.getMessage()
                     + "\n\nCheck that Minecraft and this launcher use compatible Java permissions, "
-                    + "and run both under the same Windows user.");
+                    + "and run both under the same Windows user.";
             showError(message);
         } finally {
             java.util.Arrays.fill(license, '\\0');
