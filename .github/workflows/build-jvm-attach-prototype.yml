@@ -1,0 +1,33 @@
+name: Build JVM Attach Prototype
+
+on:
+  push:
+    branches: [experiment/jvm-attach-prototype]
+    paths:
+      - 'loader/jvm-attach-prototype/**'
+      - '.github/workflows/build-jvm-attach-prototype.yml'
+  pull_request:
+    paths:
+      - 'loader/jvm-attach-prototype/**'
+      - '.github/workflows/build-jvm-attach-prototype.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build diagnostic agent
+        working-directory: loader/jvm-attach-prototype
+        run: gradle clean jar
+      - name: Verify agent manifest
+        shell: pwsh
+        run: |
+          $jar = "loader/jvm-attach-prototype/build/libs/jvm-attach-prototype-0.1.0.jar"
+          if (!(Test-Path $jar)) { throw "Agent JAR was not produced: $jar" }
+          jar tf $jar | Select-String "DiagnosticAgent.class"
