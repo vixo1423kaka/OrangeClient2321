@@ -62,7 +62,7 @@ public final class LicenseManager {
     }
 
     public static void refreshIfDue() {
-        if (checking || savedKey.isEmpty()) return;
+        if (!valid || checking || savedKey.isEmpty()) return;
         long now = System.currentTimeMillis();
         if (now - lastValidationMillis >= REVALIDATE_INTERVAL_MILLIS) {
             lastValidationMillis = now;
