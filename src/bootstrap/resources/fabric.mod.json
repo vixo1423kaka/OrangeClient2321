@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "orangeclientbootstrap",
+  "version": "${version}",
+  "name": "Orange Client Bootstrap",
+  "description": "Bootstrap bundle for Orange Client activation.",
+  "environment": "client",
+  "jars": [
+    {
+      "file": "META-INF/jars/orange-client-${version}.jar"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.15.10",
+    "minecraft": "1.21.4",
+    "java": ">=21"
+  }
+}
