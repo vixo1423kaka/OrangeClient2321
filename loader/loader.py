@@ -1066,13 +1066,31 @@ class Loader(ctk.CTk if ctk else object):
         if not installed_client:
             bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "client-mods" / MOD_JAR
             if not bundled.is_file():
-                messagebox.showerror("Client missing", "The Orange Client mod file is missing from this loader build.")
+                messagebox.showerror(
+                    "Client file missing",
+                    "This loader build does not contain the Orange Client mod file. Download the latest "
+                    "OrangeClientLoader.exe build from GitHub Actions, or place "
+                    + MOD_JAR + " in the loader's client-mods folder."
+                )
+                return
+            try:
+                mods_dir.mkdir(parents=True, exist_ok=True)
+                installed_client = mods_dir / MOD_JAR
+                shutil.copy2(bundled, installed_client)
+            except OSError as exc:
+                messagebox.showerror(
+                    "Could not install client",
+                    "The loader found the bundled client but could not copy it into this Modrinth profile's mods folder.\n\n"
+                    + str(exc)
+                )
                 return
             messagebox.showinfo(
-                "Restart Minecraft required",
-                "The compatible game was found, but Orange Client is not installed in its mods folder.\n\n"
-                "A normal Fabric mod cannot be injected into an already-running Minecraft process by copying its JAR. "
-                "Install the client mod and restart Minecraft before using LOAD."
+                "Orange Client installed",
+                "Orange Client was copied into this Modrinth profile's mods folder:\n\n"
+                + str(installed_client)
+                + "\n\nMinecraft has already started, so Fabric cannot load a new mod into this session. "
+                "Close Minecraft completely and launch the same 1.21.4 Fabric profile again. "
+                "Then reopen the loader and press LOAD."
             )
             return
         config_dir = Path(game["game_dir"]) / "config"
