@@ -600,7 +600,7 @@ class Loader(ctk.CTk if ctk else object):
         self._persist()
         if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
             self.license_status_label.configure(
-                text="License will be checked online when you press LOAD", text_color=MUTED)
+                text="License is checked online after one-time setup, when you press LOAD", text_color=MUTED)
         self._update_load_button()
 
     def _update_load_button(self):
