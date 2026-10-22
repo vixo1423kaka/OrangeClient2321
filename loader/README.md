@@ -37,10 +37,13 @@ Bez Client ID przycisk logowania Microsoft poprosi o konfigurację, ale zakładk
 Tryb offline nie jest kontem premium i nie zapewnia uwierzytelniania na serwerach wymagających prawdziwego konta Microsoft/Minecraft.
 
 
-## Weryfikacja licencji w loaderze
 
-Zakładka Play zawiera pole klucza i przycisk **Verify license**. Po wykryciu uruchomionego Minecrafta 1.21.4 + Fabric loader wysyła klucz i odcisk JVM do istniejącego endpointu licencji, weryfikuje podpis Ed25519 tokenu oraz jego terminy i wiązanie z urządzeniem. Przycisk **LOAD** pozostaje zablokowany bez poprawnej weryfikacji i ponownie sprawdza licencję tuż przed wykonaniem akcji.
+## Aktywacja licencji i bootstrap
 
-Weryfikacja używa tego samego endpointu i klucza publicznego co `LicenseManager.java`; prywatny klucz podpisujący nie znajduje się w loaderze. Endpoint musi zwracać `valid`, `token`, `signature` i roszczenia tokenu `iat`, `exp`, `license_exp`, `key_hash`, `hwid_hash`. Zegar i czas rozpoczęcia licencji pozostają odpowiedzialnością serwera.
+Loader nie uruchamia gry. Wykrywa Minecraft 1.21.4 z Fabric i Fabric API. Przy pierwszym użyciu **LOAD** instaluje pojedynczy plik bootstrap do profilu Fabric; poprzedni plik Orange Client, jeśli istnieje, przenosi do `config/orangeclient-backup`. Fabric ładuje mody tylko podczas startu, więc po tej jednorazowej instalacji trzeba całkowicie zrestartować grę.
 
-**Ograniczenie:** to wdraża sprawdzanie licencji i blokadę przycisku, nie wstrzykiwanie kodu do już uruchomionej gry. Obecny kod Orange Client używa mixinów Fabric, które muszą być przygotowane przy starcie JVM; jeśli JAR klienta nie był załadowany przy starcie, samo kliknięcie LOAD nie może dołączyć jego mixinów do istniejącej sesji. Tę część trzeba rozwiązać osobnym bootstrapem i przetestować oddzielnie.
+Bootstrap zawiera właściwy Orange Client jako zagnieżdżony mod Fabric, dlatego nie trzeba osobno umieszczać JAR-a klienta w folderze `mods`. Po restarcie mod tworzy losowo autoryzowany endpoint HTTP ograniczony do `127.0.0.1`. Naciśnięcie **LOAD** wysyła klucz do tego endpointu; właściwy klient sprawdza go na serwerze licencji, weryfikuje podpisany token Ed25519 i dopiero po poprawnej odpowiedzi odblokowuje funkcje. Samo zainstalowanie bootstrapu nie aktywuje ani nie rozpoczyna liczenia okresu licencji.
+
+Serwer licencji musi obsługiwać istniejący endpoint `https://Vixo.pythonanywhere.com/validate` w formacie zgodnym z `LicenseManager.java`. Serwer odpowiada za aktywację niewykorzystanego klucza, datę wygaśnięcia i blokowanie licencji. Loader nie ma prywatnego klucza podpisującego.
+
+**Uwaga:** budowanie teraz tworzy `build/libs/orange-client-0.1.0.jar` jako pakiet bootstrapu, a właściwy mod znajduje się wewnątrz niego jako `META-INF/jars/orange-client-0.1.0.jar`. Standardowe zadanie `gradlew build` tworzy oba pliki.
