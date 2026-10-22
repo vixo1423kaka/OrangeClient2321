@@ -66,17 +66,48 @@ def _sha256_hex(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _license_hwid() -> str:
-    """Match the Java LicenseManager hardware fingerprint input format."""
-    import platform
-    raw = (os.environ.get("USERNAME", os.environ.get("USER", "")) +
-           platform.system() + platform.machine() +
-           os.environ.get("COMPUTERNAME", "") + os.environ.get("PROCESSOR_IDENTIFIER", "") +
-           str(os.cpu_count() or 1))
-    return _sha256_hex(raw)
+def _license_hwid(java_executable: str | None = None) -> str:
+    """Get the same fingerprint as LicenseManager.hwid() using the running game's JVM."""
+    import tempfile
 
+    if not java_executable:
+        raise ValueError("Uruchom Minecrafta przed weryfikacją licencji, aby odczytać parametry jego JVM.")
+    executable = Path(java_executable)
+    if executable.name.lower() == "javaw.exe":
+        console_java = executable.with_name("java.exe")
+        if console_java.is_file():
+            executable = console_java
+    if not executable.is_file():
+        raise ValueError("Nie udało się znaleźć pliku Java używanego przez Minecrafta.")
+    source = """
+public class OrangeHwidProbe {
+    public static void main(String[] args) {
+        System.out.println(System.getProperty("user.name"));
+        System.out.println(System.getProperty("os.name"));
+        System.out.println(System.getProperty("os.arch"));
+        System.out.println(Runtime.getRuntime().availableProcessors());
+    }
+}
+"""
+    try:
+        with tempfile.TemporaryDirectory(prefix="orange-hwid-") as temp:
+            java_file = Path(temp) / "OrangeHwidProbe.java"
+            java_file.write_text(source, encoding="utf-8")
+            result = subprocess.run(
+                [str(executable), str(java_file)], capture_output=True, text=True,
+                timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                errors="replace")
+        values = result.stdout.strip().splitlines()
+        if result.returncode != 0 or len(values) < 4:
+            raise ValueError("Java nie zwróciła parametrów potrzebnych do weryfikacji licencji.")
+        user_name, os_name, os_arch, cpu_count = values[:4]
+        raw = (user_name + os_name + os_arch + os.environ.get("COMPUTERNAME", "")
+               + os.environ.get("PROCESSOR_IDENTIFIER", "") + cpu_count)
+        return _sha256_hex(raw)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError("Nie można odczytać parametrów JVM Minecrafta: " + str(exc)) from exc
 
-def validate_license_online(key: str) -> dict:
+def validate_license_online(key: str, java_executable: str | None = None) -> dict:
     """Validate a key against the signed-token API used by the Fabric mod."""
     from cryptography.hazmat.primitives import serialization
     from cryptography.exceptions import InvalidSignature
@@ -87,7 +118,8 @@ def validate_license_online(key: str) -> dict:
     key = (key or "").strip()
     if not key:
         raise ValueError("Wpisz klucz licencji.")
-    body = json.dumps({"key": key, "hwid": _license_hwid()}, separators=(",", ":")).encode("utf-8")
+    machine_id = _license_hwid(java_executable)
+    body = json.dumps({"key": key, "hwid": machine_id}, separators=(",", ":")).encode("utf-8")
     request = urllib.request.Request(
         LICENSE_API_URL, data=body, method="POST",
         headers={"Content-Type": "application/json", "User-Agent": "OrangeClientLoader/1.3"})
@@ -117,7 +149,7 @@ def validate_license_online(key: str) -> dict:
         now = int(time.time())
         token_iat, token_exp = int(claims["iat"]), int(claims["exp"])
         license_exp = int(claims["license_exp"])
-        hwid_hash = hashlib.sha256(_license_hwid().encode("utf-8")).hexdigest()
+        hwid_hash = hashlib.sha256(machine_id.encode("utf-8")).hexdigest()
         key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
         if (claims.get("v") != 1 or token_iat > now + 60 or token_exp <= now
                 or token_exp <= token_iat or token_exp - token_iat > MAX_LICENSE_TOKEN_SECONDS
@@ -312,6 +344,7 @@ class Loader(ctk.CTk if ctk else object):
         self.license_valid = False
         self.license_checking = False
         self.license_expiry = 0
+        self._auto_license_verify_pending = bool(self.license_key.get().strip())
         self.license_key.trace_add("write", lambda *_: self._license_key_changed())
         self.username.trace_add("write", lambda *_: self._persist())
         self._busy = False
@@ -321,8 +354,6 @@ class Loader(ctk.CTk if ctk else object):
         self._build_ui()
         self._show_play()
         self._refresh_account_label()
-        if self.license_key.get().strip():
-            self.after(400, self._verify_license_clicked)
         self.after(180, self._apply_taskbar_visibility)
         self.after(700, self._schedule_game_detection)
         self.after(120, self._apply_window_rounding)
@@ -688,6 +719,11 @@ class Loader(ctk.CTk if ctk else object):
 
     def _verify_license_clicked(self):
         key = self.license_key.get().strip()
+        if not self.detected_game:
+            if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
+                self.license_status_label.configure(
+                    text="Start Minecraft 1.21.4 Fabric first", text_color=MUTED)
+            return
         if not key:
             self.license_valid = False
             self._update_load_button()
@@ -702,11 +738,12 @@ class Loader(ctk.CTk if ctk else object):
         if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
             self.license_status_label.configure(text="Contacting license server…", text_color=MUTED)
         self._update_load_button()
-        threading.Thread(target=self._verify_license_worker, args=(key,), daemon=True).start()
+        java_executable = self.detected_game.get("java_executable", "")
+        threading.Thread(target=self._verify_license_worker, args=(key, java_executable), daemon=True).start()
 
-    def _verify_license_worker(self, key):
+    def _verify_license_worker(self, key, java_executable):
         try:
-            result = validate_license_online(key)
+            result = validate_license_online(key, java_executable)
             error = None
         except Exception as exc:
             result, error = None, str(exc)
@@ -1129,7 +1166,7 @@ class Loader(ctk.CTk if ctk else object):
             "$p = Get-CimInstance Win32_Process | Where-Object { "
             "$_.Name -in @('java.exe','javaw.exe') -and "
             "$_.CommandLine -match 'net\\.minecraft|fabric-loader|KnotClient|fabricmc' } "
-            "| Select-Object ProcessId,CommandLine; "
+            "| Select-Object ProcessId,CommandLine,ExecutablePath; "
             "if ($null -ne $p) { $p | ConvertTo-Json -Compress -Depth 3 }"
         )
         try:
@@ -1185,6 +1222,7 @@ class Loader(ctk.CTk if ctk else object):
             if fabric_api:
                 return {
                     "pid": int(proc.get("ProcessId") or 0),
+                    "java_executable": str(proc.get("ExecutablePath") or ""),
                     "game_dir": str(game_dir),
                     "mods_dir": str(mods_dir),
                     "fabric_api": fabric_api.name
@@ -1201,6 +1239,9 @@ class Loader(ctk.CTk if ctk else object):
             self._update_load_button()
             if found:
                 self.status.configure(text=f"Compatible game detected · PID {found['pid']} · Minecraft 1.21.4 Fabric + Fabric API")
+                if self._auto_license_verify_pending:
+                    self._auto_license_verify_pending = False
+                    self.after(100, self._verify_license_clicked)
             elif not self.license_valid:
                 self.status.configure(text="Enter and verify a valid license, then start Minecraft 1.21.4 Fabric.")
             else:
@@ -1224,7 +1265,7 @@ class Loader(ctk.CTk if ctk else object):
 
     def _load_after_license_check(self, game, key):
         try:
-            validate_license_online(key)
+            validate_license_online(key, game.get("java_executable", ""))
         except Exception as exc:
             message = str(exc)
             self.ui(lambda: messagebox.showerror("License rejected", message))
