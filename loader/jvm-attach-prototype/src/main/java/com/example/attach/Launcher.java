@@ -1,28 +1,31 @@
 package com.example.attach;
 
+import com.sun.tools.attach.VirtualMachine;
+
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
 
 /**
- * Launcher stage 2: installs the bundled Fabric mod into a user-selected game
- * instance. It does not claim to hot-load Fabric mods into an already running JVM.
+ * Attach UI: detects Java processes and attaches the bundled agent to a selected
+ * Minecraft process. It does not ask the user to locate a game folder.
  */
 public final class Launcher {
     private final JFrame frame = new JFrame("Orange Client");
     private final JPasswordField licenseField = new JPasswordField(24);
-    private final JLabel status = new JLabel("Choose your Minecraft instance when ready.");
+    private final JComboBox<GameProcess> processes = new JComboBox<>();
+    private final JLabel status = new JLabel("Detect running Minecraft Java instances.");
     private final JTextArea log = new JTextArea(8, 42);
+    private final JButton loadButton = new JButton("LOAD INTO MINECRAFT");
 
     private Launcher() {
         frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
-        frame.setMinimumSize(new Dimension(540, 400));
+        frame.setMinimumSize(new Dimension(560, 420));
 
         JPanel root = new JPanel(new BorderLayout(12, 12));
         root.setBorder(new EmptyBorder(18, 18, 18, 18));
@@ -31,7 +34,7 @@ public final class Launcher {
         JLabel heading = new JLabel("ORANGE CLIENT");
         heading.setForeground(new Color(255, 139, 46));
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 23f));
-        JLabel subtitle = new JLabel("Minecraft Java 1.21.4 • installer preview");
+        JLabel subtitle = new JLabel("Minecraft Java 1.21.4 • live attach prototype");
         subtitle.setForeground(new Color(205, 207, 215));
         JPanel top = new JPanel(new GridLayout(0, 1, 4, 4));
         top.setOpaque(false);
@@ -45,27 +48,39 @@ public final class Launcher {
         c.insets = new Insets(6, 0, 6, 8);
         c.anchor = GridBagConstraints.WEST;
         c.fill = GridBagConstraints.HORIZONTAL;
+
         JLabel licenseLabel = new JLabel("License key");
         licenseLabel.setForeground(Color.WHITE);
-        c.gridx = 0; c.gridy = 0;
+        c.gridx = 0; c.gridy = 0; c.weightx = 0;
         fields.add(licenseLabel, c);
         c.gridx = 1; c.weightx = 1;
         fields.add(licenseField, c);
 
-        JButton install = new JButton("INSTALL TO INSTANCE");
-        install.setFont(install.getFont().deriveFont(Font.BOLD, 14f));
-        install.addActionListener(e -> installPayload());
-        c.gridx = 1; c.gridy = 1; c.weightx = 0;
-        fields.add(install, c);
+        JLabel processLabel = new JLabel("Minecraft process");
+        processLabel.setForeground(Color.WHITE);
+        c.gridx = 0; c.gridy = 1; c.weightx = 0;
+        fields.add(processLabel, c);
+        c.gridx = 1; c.weightx = 1;
+        fields.add(processes, c);
+
+        JButton refresh = new JButton("Refresh");
+        refresh.addActionListener(e -> refreshProcesses());
+        c.gridx = 0; c.gridy = 2; c.weightx = 0;
+        fields.add(refresh, c);
+        loadButton.setFont(loadButton.getFont().deriveFont(Font.BOLD, 14f));
+        loadButton.addActionListener(e -> attachAgent());
+        c.gridx = 1; c.weightx = 1;
+        fields.add(loadButton, c);
         root.add(fields, BorderLayout.CENTER);
 
         log.setEditable(false);
         log.setLineWrap(true);
         log.setWrapStyleWord(true);
-        log.setText("This build installs the bundled Fabric mod into a selected instance's mods folder.\n"
-                + "License verification is not connected. Hot-loading into a running game is not implemented.\n");
+        log.setText("No folder selection or manual file copying. Start Minecraft first, then select its Java process.\n"
+                + "Current agent performs diagnostics only; it does not yet initialize Orange Client, GUI, or modules.\n"
+                + "License verification is not connected to a license server.\n");
         JScrollPane scroll = new JScrollPane(log);
-        scroll.setPreferredSize(new Dimension(490, 145));
+        scroll.setPreferredSize(new Dimension(500, 145));
         JPanel bottom = new JPanel(new BorderLayout(4, 6));
         bottom.setOpaque(false);
         status.setForeground(new Color(255, 190, 120));
@@ -76,9 +91,34 @@ public final class Launcher {
         frame.setContentPane(root);
         frame.pack();
         frame.setLocationRelativeTo(null);
+        refreshProcesses();
     }
 
-    private void installPayload() {
+    private void refreshProcesses() {
+        processes.removeAllItems();
+        List<GameProcess> found = new ArrayList<>();
+        ProcessHandle.allProcesses().forEach(p -> {
+            ProcessHandle.Info info = p.info();
+            String command = info.command().orElse("");
+            String args = String.join(" ", info.arguments().orElse(new String[0]));
+            String combined = (command + " " + args).toLowerCase(Locale.ROOT);
+            if (!combined.contains("java")) return;
+            if (combined.contains("minecraft") || combined.contains("net.fabricmc")
+                    || combined.contains("modrinth") || combined.contains("knotclient")
+                    || combined.contains("gameprovider")) {
+                found.add(new GameProcess(p.pid(), command.isBlank() ? "Java" : Path.of(command).getFileName().toString(),
+                        args.length() > 100 ? args.substring(0, 100) + "…" : args));
+            }
+        });
+        found.sort(Comparator.comparingLong(GameProcess::pid));
+        for (GameProcess process : found) processes.addItem(process);
+        status.setText(found.isEmpty()
+                ? "No Minecraft Java process detected. Launch the instance, then Refresh."
+                : "Found " + found.size() + " possible game process(es).");
+        append("Process scan: " + found.size() + " candidate(s).");
+    }
+
+    private void attachAgent() {
         char[] license = licenseField.getPassword();
         try {
             if (license.length == 0) {
@@ -86,44 +126,39 @@ public final class Launcher {
                         "License required", JOptionPane.WARNING_MESSAGE);
                 return;
             }
-            // Do not log or persist the key: there is no configured verifier yet.
-            JFileChooser chooser = new JFileChooser();
-            chooser.setDialogTitle("Select your Minecraft / Modrinth instance folder");
-            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-            if (chooser.showOpenDialog(frame) != JFileChooser.APPROVE_OPTION) return;
-
-            Path instance = chooser.getSelectedFile().toPath().toAbsolutePath().normalize();
-            Path mods = instance.resolve("mods");
-            Files.createDirectories(mods);
-            String resource = "/payload/orange-client-inner-0.1.0.jar";
-            Path destination = mods.resolve("orange-client-inner-0.1.0.jar");
-            try (InputStream in = Launcher.class.getResourceAsStream(resource)) {
-                if (in == null) {
-                    throw new IOException("Bundled client payload is missing. Download the newest Orange-Client-Launcher artifact.");
-                }
-                Path temp = Files.createTempFile(mods, "orange-client-", ".tmp");
-                try {
-                    Files.copy(in, temp, StandardCopyOption.REPLACE_EXISTING);
-                    try {
-                        Files.move(temp, destination, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-                    } catch (IOException atomicMoveUnsupported) {
-                        Files.move(temp, destination, StandardCopyOption.REPLACE_EXISTING);
-                    }
-                } finally {
-                    Files.deleteIfExists(temp);
-                }
+            GameProcess selected = (GameProcess) processes.getSelectedItem();
+            if (selected == null) {
+                JOptionPane.showMessageDialog(frame, "No Minecraft process selected. Start the game and press Refresh.",
+                        "Minecraft not found", JOptionPane.WARNING_MESSAGE);
+                return;
             }
-            String message = "Orange Client mod copied to:\n" + destination
-                    + "\n\nClose Minecraft completely and launch this instance again. "
-                    + "This installer does not hot-load Fabric mods into a running game.\n"
-                    + "License was NOT verified because no license server is configured.";
+            Path agentJar = Path.of(Launcher.class.getProtectionDomain().getCodeSource()
+                    .getLocation().toURI()).toAbsolutePath().normalize();
+            if (!agentJar.toString().toLowerCase(Locale.ROOT).endsWith(".jar")) {
+                throw new IllegalStateException("Run the packaged launcher JAR, not from an IDE/classes directory.");
+            }
+
+            status.setText("Attaching to PID " + selected.pid() + "…");
+            VirtualMachine vm = VirtualMachine.attach(Long.toString(selected.pid()));
+            try {
+                vm.loadAgent(agentJar.toString(), "orange-client-discovery");
+            } finally {
+                vm.detach();
+            }
+            String message = "Agent attached to PID " + selected.pid() + ".\n"
+                    + "Diagnostic log: " + System.getProperty("java.io.tmpdir") + "/orange-jvm-agent.log\n\n"
+                    + "Important: this build verifies agent attachment and Minecraft class discovery only. "
+                    + "It does not yet load the Orange Client GUI or modules. The license was not verified.";
             append(message);
-            status.setText("Installed to instance; restart Minecraft to load the mod.");
-            JOptionPane.showMessageDialog(frame, message, "Installation complete", JOptionPane.INFORMATION_MESSAGE);
+            status.setText("Agent attached; check the diagnostic log.");
+            JOptionPane.showMessageDialog(frame, message, "Attach result", JOptionPane.INFORMATION_MESSAGE);
         } catch (Throwable ex) {
-            showError(ex.getClass().getSimpleName() + ": " + ex.getMessage());
+            String message = ex.getClass().getSimpleName() + ": " + ex.getMessage()
+                    + "\n\nCheck that Minecraft and this launcher use compatible Java permissions, "
+                    + "and run both under the same Windows user.");
+            showError(message);
         } finally {
-            Arrays.fill(license, '\0');
+            java.util.Arrays.fill(license, '\\0');
             licenseField.setText("");
         }
     }
@@ -134,12 +169,18 @@ public final class Launcher {
     }
 
     private void showError(String message) {
-        status.setText("Installation failed.");
+        status.setText("Attach failed.");
         append(message);
         JOptionPane.showMessageDialog(frame, message, "Error", JOptionPane.ERROR_MESSAGE);
     }
 
     private void show() { frame.setVisible(true); }
+
+    private record GameProcess(long pid, String executable, String arguments) {
+        @Override public String toString() {
+            return pid + " — " + executable + (arguments.isBlank() ? "" : " — " + arguments);
+        }
+    }
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new Launcher().show());
