@@ -10,8 +10,8 @@ public final class AttachClient {
     private AttachClient() {}
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 2) {
-            System.err.println("Usage: AttachClient <pid> <agent-jar>");
+        if (args.length < 2 || args.length > 3) {
+            System.err.println("Usage: AttachClient <pid> <agent-jar> [license-key]");
             System.exit(2);
         }
 
@@ -26,8 +26,8 @@ public final class AttachClient {
 
         VirtualMachine vm = VirtualMachine.attach(pid);
         try {
-            vm.loadAgent(agent.toString(), "orange-client-discovery");
-            System.out.println("Discovery agent attached. Check the temp file orange-jvm-agent.log; this does not initialize Orange Client yet.");
+            vm.loadAgent(agent.toString(), args.length > 2 ? "key=" + args[2] : "");
+            System.out.println("Agent attached. Result: " + System.getProperty("java.io.tmpdir") + "/orange-agent-result.txt");
         } finally {
             vm.detach();
         }
