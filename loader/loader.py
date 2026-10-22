@@ -590,7 +590,7 @@ class Loader(ctk.CTk if ctk else object):
         license_actions = ctk.CTkFrame(c, fg_color="transparent")
         license_actions.pack(fill="x", padx=16, pady=(0, 12))
         self.license_status_label = ctk.CTkLabel(
-            license_actions, text="License is checked online when you press LOAD",
+            license_actions, text="License is checked online after one-time setup, when you press LOAD",
             text_color=MUTED, font=("Segoe UI", 10), anchor="w", justify="left")
         self.license_status_label.pack(side="left", fill="x", expand=True)
 
