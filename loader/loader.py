@@ -55,6 +55,83 @@ except ImportError:
 REDIRECT_PORT = 28487
 REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}"
 
+
+LICENSE_API_URL = "https://Vixo.pythonanywhere.com/validate"
+LICENSE_PUBLIC_KEY_X509_B64 = "MCowBQYDK2VwAyEANxglvfaj6XgHv5WSoPncL+woXMcO8Kj9WdlLhUhhEGE="
+MAX_LICENSE_TOKEN_SECONDS = 300
+
+
+def _sha256_hex(value: str) -> str:
+    import hashlib
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _license_hwid() -> str:
+    """Match the Java LicenseManager hardware fingerprint input format."""
+    import platform
+    raw = (os.environ.get("USERNAME", os.environ.get("USER", "")) +
+           platform.system() + platform.machine() +
+           os.environ.get("COMPUTERNAME", "") + os.environ.get("PROCESSOR_IDENTIFIER", "") +
+           str(os.cpu_count() or 1))
+    return _sha256_hex(raw)
+
+
+def validate_license_online(key: str) -> dict:
+    """Validate a key against the signed-token API used by the Fabric mod."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.exceptions import InvalidSignature
+    import base64
+    import hashlib
+    import time
+
+    key = (key or "").strip()
+    if not key:
+        raise ValueError("Wpisz klucz licencji.")
+    body = json.dumps({"key": key, "hwid": _license_hwid()}, separators=(",", ":")).encode("utf-8")
+    request = urllib.request.Request(
+        LICENSE_API_URL, data=body, method="POST",
+        headers={"Content-Type": "application/json", "User-Agent": "OrangeClientLoader/1.3"})
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            data = json.loads(exc.read().decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            data = {}
+        raise ValueError(data.get("message") or "Serwer odrzucił licencję (HTTP %s)." % exc.code)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        raise ValueError("Nie można połączyć się z serwerem licencji: " + str(exc))
+
+    if not isinstance(data, dict) or data.get("valid") is not True:
+        raise ValueError((data.get("message") if isinstance(data, dict) else None) or "Licencja jest nieaktywna lub nieważna.")
+    token, signature = data.get("token"), data.get("signature")
+    if not isinstance(token, str) or not isinstance(signature, str):
+        raise ValueError("Serwer nie zwrócił podpisanego tokenu licencji.")
+    try:
+        raw_token = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
+        raw_signature = base64.urlsafe_b64decode(signature + "=" * (-len(signature) % 4))
+        public_key = serialization.load_der_public_key(base64.b64decode(LICENSE_PUBLIC_KEY_X509_B64))
+        public_key.verify(raw_signature, raw_token)
+        claims = json.loads(raw_token.decode("utf-8"))
+        now = int(time.time())
+        token_iat, token_exp = int(claims["iat"]), int(claims["exp"])
+        license_exp = int(claims["license_exp"])
+        hwid_hash = hashlib.sha256(_license_hwid().encode("utf-8")).hexdigest()
+        key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        if (claims.get("v") != 1 or token_iat > now + 60 or token_exp <= now
+                or token_exp <= token_iat or token_exp - token_iat > MAX_LICENSE_TOKEN_SECONDS
+                or (license_exp > 0 and license_exp <= now)
+                or key_hash != claims.get("key_hash") or hwid_hash != claims.get("hwid_hash")):
+            raise ValueError("Token licencji wygasł lub nie pasuje do tego urządzenia.")
+    except InvalidSignature:
+        raise ValueError("Nieprawidłowy podpis serwera licencji.")
+    except (KeyError, TypeError, UnicodeDecodeError) as exc:
+        raise ValueError("Nie można zweryfikować tokenu licencji.") from exc
+    return {"expires_at": int(claims["license_exp"]), "token_expires_at": int(claims["exp"])}
+
+
+
 BG, SIDE, PANEL, BORDER = "#0b0d12", "#10141c", "#151b26", "#242c3b"
 TEXT, MUTED, ORANGE, ORANGE_H = "#f2f4f8", "#8691a6", "#f47c20", "#ff963f"
 GREEN, RED = "#69d69a", "#ff6b6b"
@@ -232,7 +309,10 @@ class Loader(ctk.CTk if ctk else object):
         self.mode = tk.StringVar(value=s.get("mode", "offline"))
         self.username = tk.StringVar(value=s.get("username", "Player"))
         self.license_key = tk.StringVar(value=s.get("license_key", "") or self._key_from_instances())
-        self.license_key.trace_add("write", lambda *_: self._persist())
+        self.license_valid = False
+        self.license_checking = False
+        self.license_expiry = 0
+        self.license_key.trace_add("write", lambda *_: self._license_key_changed())
         self.username.trace_add("write", lambda *_: self._persist())
         self._busy = False
         self.detected_game = None
@@ -241,6 +321,8 @@ class Loader(ctk.CTk if ctk else object):
         self._build_ui()
         self._show_play()
         self._refresh_account_label()
+        if self.license_key.get().strip():
+            self.after(400, self._verify_license_clicked)
         self.after(180, self._apply_taskbar_visibility)
         self.after(700, self._schedule_game_detection)
         self.after(120, self._apply_window_rounding)
@@ -584,6 +666,80 @@ class Loader(ctk.CTk if ctk else object):
         self.key_entry.pack(side="left", fill="x", expand=True)
         self.show_key = ctk.CTkCheckBox(row, text="Show", width=70, command=self._toggle_key)
         self.show_key.pack(side="left", padx=(12, 0))
+        license_actions = ctk.CTkFrame(c, fg_color="transparent")
+        license_actions.pack(fill="x", padx=16, pady=(0, 12))
+        self.verify_license_btn = ctk.CTkButton(
+            license_actions, text="Verify license", width=140, height=32,
+            fg_color=ORANGE, hover_color=ORANGE_H, text_color="#101116",
+            command=self._verify_license_clicked)
+        self.verify_license_btn.pack(side="left")
+        self.license_status_label = ctk.CTkLabel(
+            license_actions, text="License not verified", text_color=MUTED,
+            font=("Segoe UI", 10), anchor="w", justify="left")
+        self.license_status_label.pack(side="left", padx=(12, 0), fill="x", expand=True)
+
+    def _license_key_changed(self):
+        self.license_valid = False
+        self.license_expiry = 0
+        self._persist()
+        if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
+            self.license_status_label.configure(text="Key changed — verify again", text_color=MUTED)
+        self._update_load_button()
+
+    def _verify_license_clicked(self):
+        key = self.license_key.get().strip()
+        if not key:
+            self.license_valid = False
+            self._update_load_button()
+            if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
+                self.license_status_label.configure(text="Enter a license key first", text_color=RED)
+            return
+        if self.license_checking:
+            return
+        self.license_checking = True
+        if hasattr(self, "verify_license_btn") and self.verify_license_btn.winfo_exists():
+            self.verify_license_btn.configure(state="disabled", text="Checking…")
+        if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
+            self.license_status_label.configure(text="Contacting license server…", text_color=MUTED)
+        self._update_load_button()
+        threading.Thread(target=self._verify_license_worker, args=(key,), daemon=True).start()
+
+    def _verify_license_worker(self, key):
+        try:
+            result = validate_license_online(key)
+            error = None
+        except Exception as exc:
+            result, error = None, str(exc)
+        def apply():
+            self.license_checking = False
+            if hasattr(self, "verify_license_btn") and self.verify_license_btn.winfo_exists():
+                self.verify_license_btn.configure(state="normal", text="Verify license")
+            if key != self.license_key.get().strip():
+                return
+            self.license_valid = result is not None
+            self.license_expiry = int(result.get("expires_at", 0)) if result else 0
+            if hasattr(self, "license_status_label") and self.license_status_label.winfo_exists():
+                if error:
+                    self.license_status_label.configure(text=error, text_color=RED)
+                elif self.license_expiry > 0:
+                    from datetime import datetime
+                    expiry_text = datetime.fromtimestamp(self.license_expiry).strftime("%Y-%m-%d %H:%M")
+                    self.license_status_label.configure(text="Active · expires " + expiry_text, text_color=GREEN)
+                else:
+                    self.license_status_label.configure(text="License active · no expiry reported", text_color=GREEN)
+            self._update_load_button()
+        self.ui(apply)
+
+    def _update_load_button(self):
+        if not hasattr(self, "play_btn") or not self.play_btn.winfo_exists():
+            return
+        can_load = bool(self.detected_game and self.license_valid and not self.license_checking)
+        if can_load:
+            self.play_btn.configure(state="normal", fg_color=ORANGE, hover_color=ORANGE_H,
+                                    text_color="#101116", text="LOAD")
+        else:
+            self.play_btn.configure(state="disabled", fg_color="#343b49", hover_color="#424b5d",
+                                    text_color="#aeb6c5", text="LOAD")
 
     def _animate_hero(self):
         """Visible, continuous orange glow and moving particles in the hero banner."""
@@ -1042,13 +1198,12 @@ class Loader(ctk.CTk if ctk else object):
             if not self.winfo_exists():
                 return
             self.detected_game = found
+            self._update_load_button()
             if found:
-                self.play_btn.configure(state="normal", fg_color=ORANGE, hover_color=ORANGE_H,
-                                        text_color="#101116", text="LOAD")
                 self.status.configure(text=f"Compatible game detected · PID {found['pid']} · Minecraft 1.21.4 Fabric + Fabric API")
+            elif not self.license_valid:
+                self.status.configure(text="Enter and verify a valid license, then start Minecraft 1.21.4 Fabric.")
             else:
-                self.play_btn.configure(state="disabled", fg_color="#343b49", hover_color="#424b5d",
-                                        text_color="#aeb6c5", text="LOAD")
                 self.status.configure(text="Waiting for Minecraft 1.21.4 with Fabric and Fabric API in the mods folder…")
         self.ui(apply_result)
 
@@ -1060,6 +1215,35 @@ class Loader(ctk.CTk if ctk else object):
         if not key:
             messagebox.showerror("License required", "Enter your Orange Client license key first.")
             return
+        if self._busy:
+            return
+        self._busy = True
+        self.play_btn.configure(state="disabled", text="CHECKING LICENSE…")
+        self._set_status("Revalidating license before LOAD…")
+        threading.Thread(target=self._load_after_license_check, args=(game, key), daemon=True).start()
+
+    def _load_after_license_check(self, game, key):
+        try:
+            validate_license_online(key)
+        except Exception as exc:
+            message = str(exc)
+            self.ui(lambda: messagebox.showerror("License rejected", message))
+            self._set_status("LOAD blocked: license validation failed.")
+            self.ui(lambda: (setattr(self, "_busy", False), self._update_load_button()))
+            return
+        def continue_load():
+            if key != self.license_key.get().strip():
+                self._busy = False
+                self._set_status("LOAD cancelled because the license key changed.")
+                self._update_load_button()
+                return
+            self.license_valid = True
+            self._busy = False
+            self._update_load_button()
+            self._finish_load_client(game, key)
+        self.ui(continue_load)
+
+    def _finish_load_client(self, game, key):
         mods_dir = Path(game["mods_dir"])
         installed_client = next((p for p in mods_dir.glob("*.jar")
                                  if p.name.lower().startswith("orange-client")), None)
