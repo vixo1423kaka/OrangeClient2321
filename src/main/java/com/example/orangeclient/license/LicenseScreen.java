@@ -11,6 +11,13 @@ import net.minecraft.text.Text;
 
 public class LicenseScreen extends Screen {
     private final Screen parent;
+
+    public static void closeIfShowing() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.currentScreen instanceof LicenseScreen screen) {
+            client.setScreen(screen.parent);
+        }
+    }
     private TextFieldWidget keyField;
     private ButtonWidget activateButton;
     private String status = "";
