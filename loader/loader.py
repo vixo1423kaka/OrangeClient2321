@@ -963,16 +963,26 @@ class Loader(ctk.CTk if ctk else object):
 
     @staticmethod
     def _find_running_fabric_game():
-        """Find a running Java Minecraft process and verify its game directory and Fabric API."""
+        """Detect Modrinth and vanilla-launcher Java processes for Minecraft 1.21.4 + Fabric."""
         if os.name != "nt":
             return None
-        script = ("$p = Get-CimInstance Win32_Process | Where-Object { "
-                  "$_.Name -in @('java.exe','javaw.exe') -and $_.CommandLine -match 'net\\.minecraft|fabric-loader' } "
-                  "| Select-Object ProcessId,CommandLine; $p | ConvertTo-Json -Compress")
+        # Fabric Loader's JAR filename usually contains only its own version, not the Minecraft version.
+        # Minecraft's version is normally passed separately as --version 1.21.4.
+        script = (
+            "$ErrorActionPreference = 'SilentlyContinue'; "
+            "$p = Get-CimInstance Win32_Process | Where-Object { "
+            "$_.Name -in @('java.exe','javaw.exe') -and "
+            "$_.CommandLine -match 'net\\.minecraft|fabric-loader|KnotClient|fabricmc' } "
+            "| Select-Object ProcessId,CommandLine; "
+            "if ($null -ne $p) { $p | ConvertTo-Json -Compress -Depth 3 }"
+        )
         try:
-            result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-                                    capture_output=True, text=True, timeout=5,
-                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+                capture_output=True, text=True, timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                errors="replace"
+            )
             if result.returncode != 0 or not result.stdout.strip():
                 return None
             data = json.loads(result.stdout.strip())
@@ -982,19 +992,47 @@ class Loader(ctk.CTk if ctk else object):
 
         for proc in processes:
             command = proc.get("CommandLine") or ""
-            version_match = re.search(r"fabric-loader-[^\s\"]*-1\.21\.4", command, re.IGNORECASE)
-            if not version_match or "fabric-loader" not in command.lower():
+            if not re.search(r"net\.fabricmc\.loader|fabric-loader|KnotClient", command, re.IGNORECASE):
                 continue
-            dir_match = re.search(r'--gameDir\s+"([^"]+)"|--gameDir\s+(\S+)', command, re.IGNORECASE)
-            game_dir = Path((dir_match.group(1) or dir_match.group(2)) if dir_match else (Path.home() / "AppData" / "Roaming" / ".minecraft"))
+            # Accept both --version 1.21.4 and --version=1.21.4.
+            version_match = re.search(
+                r'--version(?:\s+|=)["\']?(1\.21\.4)(?:["\']?\s|$)',
+                command, re.IGNORECASE
+            )
+            # Some launchers encode the game version in their Fabric profile/library path.
+            if not version_match:
+                version_match = re.search(
+                    r"fabric-loader-[^\\\s\"']*[-_]1\.21\.4(?:\.jar)?",
+                    command, re.IGNORECASE
+                )
+            if not version_match:
+                continue
+
+            dir_match = re.search(
+                r'--gameDir(?:\s+|=)["\']?(.+?)(?=["\']?\s+--|\s+-D|$)',
+                command, re.IGNORECASE
+            )
+            if dir_match:
+                raw_dir = dir_match.group(1).strip().strip('"').strip("'")
+                # Trim a possible trailing quote left by command-line formatting.
+                game_dir = Path(raw_dir.rstrip('"').rstrip("'"))
+            else:
+                game_dir = Path(os.environ.get("APPDATA", str(Path.home()))) / ".minecraft"
+
             mods_dir = game_dir / "mods"
             if not mods_dir.is_dir():
                 continue
-            fabric_api = next((p for p in mods_dir.glob("*.jar")
-                               if p.name.lower().startswith("fabric-api") or "fabric-api" in p.name.lower()), None)
+            fabric_api = next(
+                (p for p in mods_dir.glob("*.jar") if "fabric-api" in p.name.lower()),
+                None
+            )
             if fabric_api:
-                return {"pid": int(proc.get("ProcessId") or 0), "game_dir": str(game_dir),
-                        "mods_dir": str(mods_dir), "fabric_api": fabric_api.name}
+                return {
+                    "pid": int(proc.get("ProcessId") or 0),
+                    "game_dir": str(game_dir),
+                    "mods_dir": str(mods_dir),
+                    "fabric_api": fabric_api.name
+                }
         return None
 
     def _detect_running_game_worker(self):
