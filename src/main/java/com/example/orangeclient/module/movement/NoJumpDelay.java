@@ -1,6 +1,6 @@
 package com.example.orangeclient.module.movement;
 
-import com.example.orangeclient.mixin.LivingEntityAccessor;
+import com.example.orangeclient.util.Acc;
 import com.example.orangeclient.module.Category;
 import com.example.orangeclient.module.Module;
 import net.minecraft.client.MinecraftClient;
@@ -23,7 +23,6 @@ public class NoJumpDelay extends Module {
 
     private static void reset(MinecraftClient mc) {
         if (mc.player == null) return;
-        LivingEntityAccessor acc = (LivingEntityAccessor) mc.player;
-        if (acc.getJumpingCooldown() != 0) acc.setJumpingCooldown(0);
+        if (Acc.getJumpingCooldown(mc.player) != 0) Acc.setJumpingCooldown(mc.player, 0);
     }
 }

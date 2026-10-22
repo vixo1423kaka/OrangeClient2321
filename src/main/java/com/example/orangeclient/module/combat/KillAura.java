@@ -1,7 +1,7 @@
 package com.example.orangeclient.module.combat;
 
 import com.example.orangeclient.friend.Friends;
-import com.example.orangeclient.mixin.LivingEntityAccessor;
+import com.example.orangeclient.util.Acc;
 import com.example.orangeclient.module.Category;
 import com.example.orangeclient.module.Module;
 import com.example.orangeclient.module.movement.Freecam;
@@ -282,10 +282,9 @@ public class KillAura extends Module {
      */
     private static void forceJump(PlayerEntity p) {
         if (!p.isOnGround() || p.isTouchingWater() || p.isInLava() || p.hasVehicle() || p.isClimbing()) return;
-        LivingEntityAccessor acc = (LivingEntityAccessor) p;
-        if (acc.getJumpingCooldown() > 0) return;
-        acc.invokeJump();
-        acc.setJumpingCooldown(10);
+        if (Acc.getJumpingCooldown(p) > 0) return;
+        Acc.invokeJump(p);
+        Acc.setJumpingCooldown(p, 10);
     }
 
     /** Czy przy RECZNYM ruchu (WASD) na drodze jest blok, ktory trzeba przeskoczyc. */

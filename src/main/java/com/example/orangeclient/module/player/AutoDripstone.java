@@ -1,6 +1,6 @@
 package com.example.orangeclient.module.player;
 
-import com.example.orangeclient.mixin.MinecraftClientAccessor;
+import com.example.orangeclient.util.Acc;
 import com.example.orangeclient.module.Category;
 import com.example.orangeclient.module.Module;
 import com.example.orangeclient.module.movement.Freecam;
@@ -63,9 +63,8 @@ public class AutoDripstone extends Module {
         if (trapdoor.get(Properties.OPEN)) return; // stawiamy tylko pod zamknieta klapa
 
         // szybsze klikanie klapy przez vanillowy prawy klik
-        MinecraftClientAccessor acc = (MinecraftClientAccessor) mc;
         int max = interval();
-        if (acc.getItemUseCooldown() > max) acc.setItemUseCooldown(max);
+        if (Acc.getItemUseCooldown(mc) > max) Acc.setItemUseCooldown(mc, max);
 
         if (placeCooldown > 0) return;
 

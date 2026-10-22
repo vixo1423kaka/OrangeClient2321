@@ -1,6 +1,6 @@
 package com.example.orangeclient.module.render;
 
-import com.example.orangeclient.mixin.HeldItemRendererAccessor;
+import com.example.orangeclient.util.Acc;
 import com.example.orangeclient.module.Category;
 import com.example.orangeclient.module.Module;
 import com.example.orangeclient.module.ModuleManager;
@@ -60,16 +60,16 @@ public class HandAnimations extends Module {
         if (sw && !wasSwinging) flip = !flip;           // co machniecie zmienia kierunek obrotu (tryb Six)
         wasSwinging = sw;
 
-        HeldItemRendererAccessor acc = (HeldItemRendererAccessor) mc.getEntityRenderDispatcher().getHeldItemRenderer();
+        var held = mc.getEntityRenderDispatcher().getHeldItemRenderer();
         if (disableSwapMain.get()) {                    // bez animacji wyciagania przy zmianie slotu
-            acc.orange$setEquipProgressMainHand(1f);
-            acc.orange$setPrevEquipProgressMainHand(1f);
-            acc.orange$setMainHand(mc.player.getMainHandStack());
+            Acc.setEquipProgressMainHand(held, 1f);
+            Acc.setPrevEquipProgressMainHand(held, 1f);
+            Acc.setMainHand(held, mc.player.getMainHandStack());
         }
         if (disableSwapOff.get()) {
-            acc.orange$setEquipProgressOffHand(1f);
-            acc.orange$setPrevEquipProgressOffHand(1f);
-            acc.orange$setOffHand(mc.player.getOffHandStack());
+            Acc.setEquipProgressOffHand(held, 1f);
+            Acc.setPrevEquipProgressOffHand(held, 1f);
+            Acc.setOffHand(held, mc.player.getOffHandStack());
         }
     }
 

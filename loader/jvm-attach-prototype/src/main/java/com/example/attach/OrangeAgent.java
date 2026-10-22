@@ -26,6 +26,7 @@ public final class OrangeAgent {
     private static final String[] MC_CLIENT = {"net.minecraft.class_310", "net.minecraft.client.MinecraftClient"};
     private static final String CLIENT_MAIN = "com.example.orangeclient.OrangeClient";
     private static final String LICENSE = "com.example.orangeclient.license.LicenseManager";
+    private static final String LIVE_RES = "com.example.orangeclient.util.LiveResources";
     private static final String PAYLOAD_PREFIX = "payload/";
     private static final Object LOCK = new Object();
     private static volatile boolean done;
@@ -91,9 +92,10 @@ public final class OrangeAgent {
                 Method init = main.getMethod("onInitializeClient");
                 Executor gameThread = (Executor) findMinecraftInstance(mc);
 
+                ClassLoader mainLoader = main.getClassLoader();
                 CompletableFuture<Void> initDone = new CompletableFuture<>();
                 gameThread.execute(() -> {
-                    try { init.invoke(instance); initDone.complete(null); }
+                    try { installResources(mainLoader); init.invoke(instance); initDone.complete(null); }
                     catch (Throwable t) { initDone.completeExceptionally(t.getCause() != null ? t.getCause() : t); }
                 });
                 initDone.get(30, java.util.concurrent.TimeUnit.SECONDS);
@@ -113,6 +115,16 @@ public final class OrangeAgent {
             log("error (full trace):\n" + sw);
             log("error: " + c);
             result("FAILED " + c.getClass().getSimpleName() + ": " + c.getMessage());
+        }
+    }
+
+    /** Registers GUI textures from the client jar (Fabric only does this at startup). Runs on the game thread. */
+    private static void installResources(ClassLoader cl) {
+        try {
+            Class.forName(LIVE_RES, true, cl).getMethod("install").invoke(null);
+            log("live resources installed");
+        } catch (Throwable t) {
+            log("live resources failed: " + (t.getCause() != null ? t.getCause() : t));
         }
     }
 

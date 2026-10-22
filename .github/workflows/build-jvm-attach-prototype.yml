@@ -29,7 +29,17 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
       - name: Build Fabric client payload
-        run: .\gradlew.bat remapJar --no-daemon
+        shell: pwsh
+        run: |
+          .\gradlew.bat remapJar --no-daemon 2>&1 | Tee-Object -FilePath build.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $hits = Get-Content build.log | Select-String -Pattern 'error:|What went wrong|Execution failed' -Context 0,2 | ForEach-Object { ($_.Line, $_.Context.PostContext) -join "`n" }
+            $msg = ($hits | Select-Object -First 40) -join "`n"
+            $msg = $msg.Replace('%','%25').Replace("`r",'').Replace("`n",'%0A')
+            Write-Host "::error title=build-errors::$msg"
+            exit $code
+          }
       - name: Inspect client payload
         shell: pwsh
         run: |

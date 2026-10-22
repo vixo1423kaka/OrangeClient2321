@@ -1,6 +1,6 @@
 package com.example.orangeclient.module.player;
 
-import com.example.orangeclient.mixin.ClientPlayerInteractionManagerAccessor;
+import com.example.orangeclient.util.Acc;
 import com.example.orangeclient.module.Category;
 import com.example.orangeclient.module.Module;
 import com.example.orangeclient.module.movement.Freecam;
@@ -28,15 +28,14 @@ public class FastBreak extends Module {
         if (mc.player.isCreative() || mc.player.isSpectator() || Freecam.isActive()) return;
 
         ClientPlayerInteractionManager im = mc.interactionManager;
-        ClientPlayerInteractionManagerAccessor acc = (ClientPlayerInteractionManagerAccessor) im;
 
         int maxDelay = (int) delay.get();
-        if (acc.getBlockBreakingCooldown() > maxDelay) acc.setBlockBreakingCooldown(maxDelay);
+        if (Acc.getBlockBreakingCooldown(im) > maxDelay) Acc.setBlockBreakingCooldown(im, maxDelay);
 
         // dobijamy blok tylko gdy faktycznie go kopiemy (trzymany LPM)
-        if (progress.get() < 1.0 && acc.isBreakingBlock() && mc.options.attackKey.isPressed()
-                && acc.getCurrentBreakingProgress() >= (float) progress.get()) {
-            acc.setCurrentBreakingProgress(1.0f);
+        if (progress.get() < 1.0 && Acc.isBreakingBlock(im) && mc.options.attackKey.isPressed()
+                && Acc.getCurrentBreakingProgress(im) >= (float) progress.get()) {
+            Acc.setCurrentBreakingProgress(im, 1.0f);
         }
     }
 }

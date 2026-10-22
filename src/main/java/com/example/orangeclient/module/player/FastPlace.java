@@ -1,6 +1,6 @@
 package com.example.orangeclient.module.player;
 
-import com.example.orangeclient.mixin.MinecraftClientAccessor;
+import com.example.orangeclient.util.Acc;
 import com.example.orangeclient.module.Category;
 import com.example.orangeclient.module.Module;
 import com.example.orangeclient.setting.BoolSetting;
@@ -25,8 +25,7 @@ public class FastPlace extends Module {
                 && !(mc.player.getMainHandStack().getItem() instanceof BlockItem)
                 && !(mc.player.getOffHandStack().getItem() instanceof BlockItem)) return;
 
-        MinecraftClientAccessor acc = (MinecraftClientAccessor) mc;
         int max = (int) delay.get();
-        if (acc.getItemUseCooldown() > max) acc.setItemUseCooldown(max);
+        if (Acc.getItemUseCooldown(mc) > max) Acc.setItemUseCooldown(mc, max);
     }
 }
