@@ -30,6 +30,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Build Fabric client payload
         run: gradle remapJar
+      - name: Inspect client payload
+        shell: pwsh
+        run: |
+          Get-ChildItem build/libs | Format-Table Name, Length
+          $inner = "build/libs/orange-client-inner-0.1.0.jar"
+          if (!(Test-Path $inner)) { throw "Missing $inner" }
+          $entries = jar tf $inner
+          "Entries in ${inner}: $($entries.Count)"
+          $entries | Select-Object -First 25
+          if (!($entries | Select-String "^com/example/orangeclient/OrangeClient.class$")) {
+            throw "OrangeClient.class missing from $inner ($((Get-Item $inner).Length) bytes)"
+          }
       - name: Build launcher with bundled client payload
         working-directory: loader/jvm-attach-prototype
         run: gradle clean jar

@@ -34,6 +34,15 @@ tasks.named('jar') {
         if (!clientJar.isFile()) {
             throw new GradleException("OrangeClient payload missing: ${clientJar}. Run 'gradle remapJar' from the repository root first.")
         }
+        def zf = new java.util.zip.ZipFile(clientJar)
+        try {
+            if (zf.getEntry('com/example/orangeclient/OrangeClient.class') == null || zf.getEntry('fabric.mod.json') == null) {
+                throw new GradleException("OrangeClient payload is empty or invalid: ${clientJar} (${clientJar.length()} bytes) " +
+                        "has no OrangeClient.class / fabric.mod.json. Rebuild with 'gradle clean remapJar' in the repository root.")
+            }
+        } finally {
+            zf.close()
+        }
     }
     from(clientJar) {
         into 'payload'
