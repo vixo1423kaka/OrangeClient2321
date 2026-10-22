@@ -42,7 +42,9 @@ public final class LicenseManager {
 
     /** Licencja jest ważna tylko do wygaśnięcia podpisanego, krótkotrwałego tokenu. */
     public static boolean isValid() {
-        if (valid && (tokenExpiresAtMillis <= 0L || System.currentTimeMillis() >= tokenExpiresAtMillis)) {
+        long now = System.currentTimeMillis();
+        if (valid && (tokenExpiresAtMillis <= 0L || now >= tokenExpiresAtMillis
+                || (expiresAtMillis > 0L && now >= expiresAtMillis))) {
             valid = false;
         }
         return valid;
