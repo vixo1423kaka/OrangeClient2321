@@ -74,6 +74,15 @@ public final class OrangeAgent {
                         main = Class.forName(CLIENT_MAIN, true, payloadLoader);
                         log("OrangeClient loaded through payload child classloader");
                     } catch (ClassNotFoundException absent) {
+                        try (JarFile pj = new JarFile(jar.toFile())) {
+                            log("payload=" + jar + " size=" + Files.size(jar)
+                                    + " hasMain=" + (pj.getEntry("com/example/orangeclient/OrangeClient.class") != null)
+                                    + " hasModJson=" + (pj.getEntry("fabric.mod.json") != null)
+                                    + " nestedJars=" + pj.stream().map(java.util.jar.JarEntry::getName)
+                                            .filter(n -> n.endsWith(".jar")).toList());
+                        } catch (Exception inspect) {
+                            log("payload inspect failed: " + inspect);
+                        }
                         absent.addSuppressed(notVisible);
                         throw new ClassNotFoundException(CLIENT_MAIN + " not found in extracted payload " + jar, absent);
                     }
@@ -99,6 +108,9 @@ public final class OrangeAgent {
             }
         } catch (Throwable t) {
             Throwable c = t.getCause() != null ? t.getCause() : t;
+            java.io.StringWriter sw = new java.io.StringWriter();
+            t.printStackTrace(new java.io.PrintWriter(sw));
+            log("error (full trace):\n" + sw);
             log("error: " + c);
             result("FAILED " + c.getClass().getSimpleName() + ": " + c.getMessage());
         }
