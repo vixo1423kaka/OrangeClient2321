@@ -16,11 +16,10 @@ tasks.withType(JavaCompile).configureEach {
     options.compilerArgs += ['--add-modules', 'jdk.attach']
 }
 
-// Resolve from the repository root, not two directories above it.
-def clientJar = rootProject.file('build/libs/orange-client-inner-0.1.0.jar')
+// This project is built separately from the repository root by CI.
+def clientJar = rootProject.file('../../build/libs/orange-client-inner-0.1.0.jar')
 
 tasks.named('jar') {
-    dependsOn rootProject.tasks.named('remapJar')
     archiveBaseName = 'orange-client-launcher'
     manifest {
         attributes(
@@ -31,10 +30,9 @@ tasks.named('jar') {
             'Can-Retransform-Classes': 'false'
         )
     }
-    // Bundle the actual remapped Fabric mod into the launcher JAR.
     doFirst {
         if (!clientJar.isFile()) {
-            throw new GradleException("OrangeClient payload missing: ${clientJar}. Build the root remapJar task first.")
+            throw new GradleException("OrangeClient payload missing: ${clientJar}. Run 'gradle remapJar' from the repository root first.")
         }
     }
     from(clientJar) {
