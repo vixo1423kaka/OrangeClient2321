@@ -26,8 +26,8 @@ public final class AttachClient {
 
         VirtualMachine vm = VirtualMachine.attach(pid);
         try {
-            vm.loadAgent(agent.toString(), "user-requested-diagnostic");
-            System.out.println("Agent loaded. Check the temp file orange-jvm-agent.log.");
+            vm.loadAgent(agent.toString(), "orange-client-discovery");
+            System.out.println("Discovery agent attached. Check the temp file orange-jvm-agent.log; this does not initialize Orange Client yet.");
         } finally {
             vm.detach();
         }
