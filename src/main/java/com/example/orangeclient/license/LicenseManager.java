@@ -79,7 +79,6 @@ public final class LicenseManager {
                 }
             }
         } catch (Exception ignored) { }
-        if (!savedKey.isEmpty()) validate(savedKey);
     }
 
     /** Future zwraca null, gdy podpis serwera i wszystkie roszczenia są poprawne. */
