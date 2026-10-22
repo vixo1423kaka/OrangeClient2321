@@ -5,6 +5,7 @@ import com.example.orangeclient.gui.ClickGui;
 import com.example.orangeclient.gui.Notifications;
 import com.example.orangeclient.gui.OrangeMainMenu;
 import com.example.orangeclient.license.LicenseManager;
+import com.example.orangeclient.license.LicenseIpcServer;
 import com.example.orangeclient.module.Keybinds;
 import com.example.orangeclient.module.ModuleManager;
 import com.example.orangeclient.module.render.GuiModule;
@@ -28,6 +29,7 @@ public class OrangeClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         LicenseManager.init();
+        LicenseIpcServer.start();
         Friends.load();
         ModuleManager.init();
 
@@ -35,28 +37,36 @@ public class OrangeClient implements ClientModInitializer {
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) ->
                 client.execute(() -> LicenseManager.requireLicense(client)));
 
-        ClientTickEvents.START_CLIENT_TICK.register(ModuleManager::onPreTick);
+        ClientTickEvents.START_CLIENT_TICK.register(client -> {
+            if (LicenseManager.isValid()) ModuleManager.onPreTick(client);
+        });
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             LicenseManager.refreshIfDue();
             if (client.player != null && client.world != null) LicenseManager.requireLicense(client);
-            if (GuiModule.consumeOpen() && client.currentScreen == null && LicenseManager.isValid()) client.setScreen(new ClickGui());
-            ModuleManager.onTick(client);
-            // Replace only Minecraft’s vanilla title screen with the animated Orange Client menu.
-            if (client.currentScreen instanceof TitleScreen) {
+            if (LicenseManager.isValid()) {
+                if (GuiModule.consumeOpen() && client.currentScreen == null) client.setScreen(new ClickGui());
+                ModuleManager.onTick(client);
+            }
+            // Replace only Minecraft’s vanilla title screen after the license is activated.
+            if (LicenseManager.isValid() && client.currentScreen instanceof TitleScreen) {
                 client.setScreen(new OrangeMainMenu());
             }
         });
 
         // bindy modulow (srodkowy klik na module w GUI): sprawdzane co klatke, zeby nie gubic krotkich kliknien
-        WorldRenderEvents.START.register(ctx -> Keybinds.poll(MinecraftClient.getInstance()));
+        WorldRenderEvents.START.register(ctx -> {
+            if (LicenseManager.isValid()) Keybinds.poll(MinecraftClient.getInstance());
+        });
 
-        WorldRenderEvents.LAST.register(ModuleManager::onWorldRender);
+        WorldRenderEvents.LAST.register(ctx -> {
+            if (LicenseManager.isValid()) ModuleManager.onWorldRender(ctx);
+        });
 
         // HUD modulow (np. lista wlaczonych modulow - modul "List")
         HudRenderCallback.EVENT.register((ctx, tickCounter) -> {
             MinecraftClient mc = MinecraftClient.getInstance();
-            if (mc.options.hudHidden) return;
+            if (mc.options.hudHidden || !LicenseManager.isValid()) return;
             ModuleManager.onHudRender(ctx);
             Notifications.render(ctx);
         });
