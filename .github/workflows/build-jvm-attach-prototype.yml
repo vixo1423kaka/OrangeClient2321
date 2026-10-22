@@ -1,13 +1,19 @@
-name: Build JVM Attach Prototype
+name: Build Orange Client Launcher
 
 on:
   push:
     branches: [experiment/jvm-attach-prototype]
     paths:
+      - 'src/**'
+      - 'build.gradle'
+      - 'gradle.properties'
       - 'loader/jvm-attach-prototype/**'
       - '.github/workflows/build-jvm-attach-prototype.yml'
   pull_request:
     paths:
+      - 'src/**'
+      - 'build.gradle'
+      - 'gradle.properties'
       - 'loader/jvm-attach-prototype/**'
       - '.github/workflows/build-jvm-attach-prototype.yml'
   workflow_dispatch:
@@ -22,19 +28,22 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
-      - name: Build diagnostic agent
+      - name: Build Fabric client payload
+        run: gradle remapJar
+      - name: Build launcher with bundled client payload
         working-directory: loader/jvm-attach-prototype
         run: gradle clean jar
-      - name: Verify agent manifest
+      - name: Verify launcher and bundled payload
         shell: pwsh
         run: |
-          $jar = "loader/jvm-attach-prototype/build/libs/jvm-attach-prototype-0.1.0.jar"
-          if (!(Test-Path $jar)) { throw "Agent JAR was not produced: $jar" }
-          jar tf $jar | Select-String "DiagnosticAgent.class"
-
-      - name: Upload JAR artifact
+          $jar = "loader/jvm-attach-prototype/build/libs/orange-client-launcher-0.1.0.jar"
+          if (!(Test-Path $jar)) { throw "Launcher JAR was not produced: $jar" }
+          $entries = jar tf $jar
+          if (!($entries | Select-String "^com/example/attach/Launcher.class$")) { throw "Launcher class missing" }
+          if (!($entries | Select-String "^payload/orange-client-inner-0.1.0.jar$")) { throw "Bundled Orange Client payload missing" }
+      - name: Upload launcher JAR
         uses: actions/upload-artifact@v4
         with:
-          name: JVM-Attach-Prototype
-          path: loader/jvm-attach-prototype/build/libs/jvm-attach-prototype-0.1.0.jar
+          name: Orange-Client-Launcher
+          path: loader/jvm-attach-prototype/build/libs/orange-client-launcher-0.1.0.jar
           if-no-files-found: error
