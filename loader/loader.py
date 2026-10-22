@@ -1288,17 +1288,8 @@ class Loader(ctk.CTk if ctk else object):
                 if os.path.exists(javaw):
                     command[0] = javaw
             game_process = subprocess.Popen(command, cwd=str(game_dir))
-            if version == "1.21.4":
-                def _remove_client_mod_when_game_exits():
-                    try:
-                        game_process.wait()
-                    finally:
-                        try:
-                            client_mod_path.unlink(missing_ok=True)
-                        except OSError:
-                            pass
-                threading.Thread(target=_remove_client_mod_when_game_exits, daemon=True).start()
-            self._set_status("Game launched. The license will be checked after startup.")
+            # Keep the bootstrap installed between sessions; it is intentionally a one-time setup.
+            self._set_status("Game launched. Use LOAD to activate the license after startup.")
         except Exception as exc:
             error = humanize_login_error(exc)
             self.ui(lambda: messagebox.showerror("Could not launch", error))
