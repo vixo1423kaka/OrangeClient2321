@@ -23,7 +23,8 @@ jar {
     manifest {
         attributes(
             'Main-Class': 'com.example.attach.Launcher',
-            'Agent-Class': 'com.example.attach.DiagnosticAgent',
+            'Agent-Class': 'com.example.attach.OrangeAgent',
+            'Premain-Class': 'com.example.attach.OrangeAgent',
             'Can-Redefine-Classes': 'false',
             'Can-Retransform-Classes': 'false'
         )
