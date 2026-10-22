@@ -90,7 +90,9 @@ public class ErrorKiller extends Module {
 
         // Krok 1: przelacz na wiadro i postaw plyn.
         switchTo(mc, fluidSlot);
-        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+        // Użyj dokładnie zapamiętanej ściany bloku, przy której znajduje się przycisk/dźwignia.
+        // interactItem() wykonuje nowy raycast i może trafić w inne miejsce niż cel rozpoczęcia.
+        mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, target);
 
         // Nie zbieraj plynu w tym samym ticku, w ktorym zostal postawiony.
         // Interakcje ida do serwera asynchronicznie; natychmiastowe postawienie i
