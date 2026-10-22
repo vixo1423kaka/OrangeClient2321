@@ -34,7 +34,7 @@ public final class Launcher {
         JLabel heading = new JLabel("ORANGE CLIENT");
         heading.setForeground(new Color(255, 139, 46));
         heading.setFont(heading.getFont().deriveFont(Font.BOLD, 23f));
-        JLabel subtitle = new JLabel("Minecraft Java 1.21.4 • live attach prototype");
+        JLabel subtitle = new JLabel("Minecraft Java 1.21.4 • live attach");
         subtitle.setForeground(new Color(205, 207, 215));
         JPanel top = new JPanel(new GridLayout(0, 1, 4, 4));
         top.setOpaque(false);
@@ -76,9 +76,7 @@ public final class Launcher {
         log.setEditable(false);
         log.setLineWrap(true);
         log.setWrapStyleWord(true);
-        log.setText("No folder selection or manual file copying. Start Minecraft first, then select its Java process.\n"
-                + "Current agent performs diagnostics only; it does not yet initialize Orange Client, GUI, or modules.\n"
-                + "License verification is not connected to a license server.\n");
+        log.setText("Start Minecraft 1.21.4 (Fabric + Fabric API) first, pick its Java process, enter your key and press LOAD.\n");
         JScrollPane scroll = new JScrollPane(log);
         scroll.setPreferredSize(new Dimension(500, 145));
         JPanel bottom = new JPanel(new BorderLayout(4, 6));
@@ -138,20 +136,28 @@ public final class Launcher {
                 throw new IllegalStateException("Run the packaged launcher JAR, not from an IDE/classes directory.");
             }
 
-            status.setText("Attaching to PID " + selected.pid() + "…");
+            status.setText("Injecting into PID " + selected.pid() + "…");
+            Path result = Path.of(System.getProperty("java.io.tmpdir"), "orange-agent-result.txt");
+            java.nio.file.Files.deleteIfExists(result);
             VirtualMachine vm = VirtualMachine.attach(Long.toString(selected.pid()));
             try {
-                vm.loadAgent(agentJar.toString(), "orange-client-discovery");
+                vm.loadAgent(agentJar.toString(), "key=" + new String(license));
             } finally {
                 vm.detach();
             }
-            String message = "Agent attached to PID " + selected.pid() + ".\n"
-                    + "Diagnostic log: " + System.getProperty("java.io.tmpdir") + "/orange-jvm-agent.log\n\n"
-                    + "Important: this build verifies agent attachment and Minecraft class discovery only. "
-                    + "It does not yet load the Orange Client GUI or modules. The license was not verified.";
-            append(message);
-            status.setText("Agent attached; check the diagnostic log.");
-            JOptionPane.showMessageDialog(frame, message, "Attach result", JOptionPane.INFORMATION_MESSAGE);
+            String outcome = "No response from agent (timeout). See " + System.getProperty("java.io.tmpdir") + "/orange-jvm-agent.log";
+            for (int i = 0; i < 80; i++) {
+                if (java.nio.file.Files.isRegularFile(result)) {
+                    String text = java.nio.file.Files.readString(result).trim();
+                    if (!text.isEmpty()) { outcome = text; break; }
+                }
+                Thread.sleep(250);
+            }
+            append(outcome);
+            boolean ok = outcome.startsWith("OK");
+            status.setText(ok ? "Client injected." : "Injection failed.");
+            JOptionPane.showMessageDialog(frame, outcome, ok ? "Injected" : "Injection failed",
+                    ok ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.ERROR_MESSAGE);
         } catch (Throwable ex) {
             String message = ex.getClass().getSimpleName() + ": " + ex.getMessage()
                     + "\n\nCheck that Minecraft and this launcher use compatible Java permissions, "
