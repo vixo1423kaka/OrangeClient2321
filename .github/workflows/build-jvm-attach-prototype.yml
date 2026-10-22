@@ -29,12 +29,12 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
       - name: Build Fabric client payload
-        run: gradle remapJar
+        run: .\gradlew.bat remapJar --no-daemon
       - name: Inspect client payload
         shell: pwsh
         run: |
           $sb = New-Object System.Text.StringBuilder
-          Get-ChildItem build -Recurse -Filter *.jar | ForEach-Object {
+          Get-ChildItem build/libs, build/devlibs -Filter *.jar | ForEach-Object {
             $e = @(jar tf $_.FullName)
             $has = [bool]($e | Select-String "^com/example/orangeclient/OrangeClient.class$")
             $rel = $_.FullName.Replace($PWD.Path, '')
