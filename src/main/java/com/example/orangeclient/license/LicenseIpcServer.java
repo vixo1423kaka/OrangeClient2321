@@ -47,6 +47,7 @@ public final class LicenseIpcServer {
             Files.createDirectories(config);
             JsonObject endpoint = new JsonObject();
             endpoint.addProperty("port", created.getAddress().getPort());
+            endpoint.addProperty("pid", ProcessHandle.current().pid());
             endpoint.addProperty("token", secret);
             Files.writeString(config.resolve("orangeclient_ipc.json"), GSON.toJson(endpoint),
                     StandardCharsets.UTF_8);
