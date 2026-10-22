@@ -31,3 +31,10 @@ jobs:
           $jar = "loader/jvm-attach-prototype/build/libs/jvm-attach-prototype-0.1.0.jar"
           if (!(Test-Path $jar)) { throw "Agent JAR was not produced: $jar" }
           jar tf $jar | Select-String "DiagnosticAgent.class"
+
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JVM-Attach-Prototype
+          path: loader/jvm-attach-prototype/build/libs/jvm-attach-prototype-0.1.0.jar
+          if-no-files-found: error
