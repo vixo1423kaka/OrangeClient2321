@@ -5,7 +5,11 @@ import com.example.orangeclient.module.combat.KillAura;
 import com.example.orangeclient.module.player.ErrorKiller;
 import net.minecraft.client.MinecraftClient;
 
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 public final class Hooks {
+    private static final Logger LOGGER = Logger.getLogger("OrangeClient-LiveHooks");
     private static boolean failedLogged;
 
     private Hooks() { }
@@ -13,9 +17,7 @@ public final class Hooks {
     private static void fail(String where, Throwable t) {
         if (failedLogged) return;
         failedLogged = true;
-        java.io.StringWriter sw = new java.io.StringWriter();
-        t.printStackTrace(new java.io.PrintWriter(sw));
-        LiveMixins.log("hook error in " + where + " (further errors suppressed):\n" + sw);
+        LOGGER.log(Level.SEVERE, "Hook error in " + where + " (further errors suppressed)", t);
     }
 
     /** MinecraftClient.doItemUse() HEAD, cancellable. */
