@@ -27,7 +27,7 @@ tasks.named('jar') {
             'Agent-Class': 'com.example.attach.OrangeAgent',
             'Premain-Class': 'com.example.attach.OrangeAgent',
             'Can-Redefine-Classes': 'false',
-            'Can-Retransform-Classes': 'false'
+            'Can-Retransform-Classes': 'true'
         )
     }
     doFirst {
