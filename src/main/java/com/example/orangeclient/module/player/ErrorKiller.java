@@ -42,6 +42,7 @@ public class ErrorKiller extends Module {
     // 0 = idle, 1 = plyn postawiony (czekamy na zbieranie), 2 = plyn zebrany (czekamy na blok)
     private int phase;
     private int cooldown;
+    private int waitTicks;
     private int blockSlot = -1;
     private int fluidSlot = -1;
     private BlockHitResult target;
@@ -59,6 +60,7 @@ public class ErrorKiller extends Module {
     private void reset() {
         phase = 0;
         cooldown = 0;
+        waitTicks = 0;
         blockSlot = -1;
         fluidSlot = -1;
         target = null;
@@ -103,7 +105,9 @@ public class ErrorKiller extends Module {
         // Interakcje ida do serwera asynchronicznie; natychmiastowe postawienie i
         // zebranie w jednym ticku czesto powoduje, ze kolejne akcje nie trafiaja.
         phase = 1;
+        waitTicks = 0;
         cooldown = Math.max(1, (int) delay.get());
+        mc.player.sendMessage(Text.literal("§e[Error Killer] Próba postawienia płynu..."), true);
         return true;
     }
 
@@ -122,18 +126,32 @@ public class ErrorKiller extends Module {
         if (phase == 1) {
             // Wait for the server to replace the button/lever cell with fluid.
             if (fluidPos == null || mc.world.getFluidState(fluidPos).isEmpty()) {
+                if (++waitTicks > 40) {
+                    mc.player.sendMessage(Text.literal("§c[Error Killer] Płyn nie pojawił się w miejscu przycisku/dźwigni. Sprawdź, czy serwer pozwala tam stawiać płyn."), true);
+                    reset();
+                    return;
+                }
                 cooldown = 1;
                 return;
             }
+            waitTicks = 0;
+            mc.player.sendMessage(Text.literal("§e[Error Killer] Płyn wykryty, próba zebrania..."), true);
             pickUp(mc);
             phase = 2;
             cooldown = Math.max(1, (int) delay.get());
         } else {
             // Do not place the original block until the fluid source is gone.
             if (fluidPos != null && !mc.world.getFluidState(fluidPos).isEmpty()) {
+                if (++waitTicks > 40) {
+                    mc.player.sendMessage(Text.literal("§c[Error Killer] Płyn nadal jest na miejscu — nie udało się go zebrać."), true);
+                    reset();
+                    return;
+                }
                 cooldown = 1;
                 return;
             }
+            waitTicks = 0;
+            mc.player.sendMessage(Text.literal("§a[Error Killer] Płyn zebrany, stawiam wybrany blok."), true);
             placeBlock(mc);
         }
     }
