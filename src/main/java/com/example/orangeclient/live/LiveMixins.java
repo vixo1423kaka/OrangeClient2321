@@ -45,7 +45,7 @@ public final class LiveMixins {
 
                 try {
                     ClassReader reader = new ClassReader(classfileBuffer);
-                    ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
+                    ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
                     int[] inserted = {0};
                     ClassVisitor visitor = new ClassVisitor(Opcodes.ASM9, writer) {
                         @Override
