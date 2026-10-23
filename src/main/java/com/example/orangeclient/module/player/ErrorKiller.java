@@ -3,7 +3,6 @@ package com.example.orangeclient.module.player;
 import com.example.orangeclient.OrangeClient;
 import com.example.orangeclient.module.Category;
 import com.example.orangeclient.module.Module;
-import com.example.orangeclient.setting.NumberSetting;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.AbstractPressurePlateBlock;
 import net.minecraft.block.Block;
@@ -19,166 +18,61 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
 
 /**
- * Port moda "Error Killer" (errorkiller 1.11.1 dla MC 1.21.4, autor: sigmapowazna, licencja MIT).
- *
- * Gdy chcesz postawic blok, a w docelowej komorce stoi przeszkoda (dzwignia, przycisk, plytka,
- * tripwire), mod stawia tam wode, zbiera ja z powrotem, a na koncu stawia twoj blok.
- *
- * Delay:
- *   0 = minimalna przerwa jednego ticku (serwer musi zdazyc przetworzyc postawienie plynu)
- *   1-3 = przerwa w tickach miedzy krokami (wolniej, ale stabilniej na serwerze)
+ * ErrorKiller: when placing a block into a cell occupied by a small attachable
+ * block, use the original two bucket interactions, then place the selected block.
  */
 public class ErrorKiller extends Module {
-    /** Przerwa miedzy krokami w tickach: 0 = od razu, 3 = najwolniej. */
-    private final NumberSetting delay = add(new NumberSetting("Delay", 1, 0, 3, 1));
-
     private static Class<?> targetClass;
     private static boolean targetResolved;
-
-    // 0 = idle, 1 = plyn postawiony (czekamy na zbieranie), 2 = plyn zebrany (czekamy na blok)
-    private int phase;
-    private int cooldown;
-    private int waitTicks;
-    private int blockSlot = -1;
-    private int fluidSlot = -1;
-    private BlockHitResult target;
-    private BlockPos fluidPos;
 
     public ErrorKiller() {
         super("ErrorKiller", Category.PLAYER);
     }
 
-    @Override
-    protected void onDisable() {
-        reset();
-    }
-
-    private void reset() {
-        phase = 0;
-        cooldown = 0;
-        waitTicks = 0;
-        blockSlot = -1;
-        fluidSlot = -1;
-        target = null;
-        fluidPos = null;
-    }
-
     /**
-     * Wywolywane z mixina na poczatku MinecraftClient#doItemUse.
-     * @return true, jesli zwykle uzycie przedmiotu ma zostac anulowane
+     * Called from MinecraftClient#doItemUse HEAD. Returns true only when the
+     * attempted placement was handled by ErrorKiller.
      */
     public boolean tryIntercept(MinecraftClient mc) {
-        if (mc.player == null || mc.world == null || mc.interactionManager == null) return false;
-        if (phase != 0) return true;
+        if (mc.player == null || mc.world == null || mc.interactionManager == null
+                || mc.crosshairTarget == null) {
+            return false;
+        }
+        if (mc.crosshairTarget.getType() != HitResult.Type.BLOCK) return false;
 
-        if (mc.crosshairTarget == null || mc.crosshairTarget.getType() != HitResult.Type.BLOCK) return false;
+        ItemStack selected = mc.player.getStackInHand(Hand.MAIN_HAND);
+        if (!(selected.getItem() instanceof BlockItem)) return false;
 
-        ItemStack main = mc.player.getStackInHand(Hand.MAIN_HAND);
-        if (!(main.getItem() instanceof BlockItem)) return false;
+        BlockHitResult target = (BlockHitResult) mc.crosshairTarget;
+        BlockPos placePos = target.getBlockPos().offset(target.getSide());
+        if (!isTargetBlock(mc.world.getBlockState(placePos).getBlock())) return false;
 
-        BlockHitResult hit = (BlockHitResult) mc.crosshairTarget;
-        BlockPos pos = hit.getBlockPos().offset(hit.getSide());
-        if (!isTargetBlock(mc.world.getBlockState(pos).getBlock())) return false;
-
-        int bucket = findBucket(mc);
-        if (bucket == -1) {
-            mc.player.sendMessage(Text.literal("§c[Error Killer] Brak wiadra z woda/lawa!"), true);
+        int blockSlot = mc.player.getInventory().selectedSlot;
+        int bucketSlot = findBucket(mc);
+        if (bucketSlot < 0) {
+            mc.player.sendMessage(Text.literal("§c[Error Killer] Brak wiadra z wodą/lawą!"), true);
             return false;
         }
 
-        blockSlot = mc.player.getInventory().selectedSlot;
-        fluidSlot = bucket;
-        target = hit;
-        fluidPos = pos;
+        // Important: preserve the original mod's exact interaction sequence.
+        // interactItem performs Minecraft's normal bucket raycast. Replacing it
+        // with interactBlock(target) targets the support block, not the bucket's
+        // actual fluid-placement target; waiting for fluid at placePos then stalls.
+        mc.player.getInventory().selectedSlot = bucketSlot;
+        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+        mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
 
-        // Krok 1: przelacz na wiadro i postaw plyn.
-        switchTo(mc, fluidSlot);
-        // Użyj dokładnie zapamiętanej ściany bloku, przy której znajduje się przycisk/dźwignia.
-        // interactItem() wykonuje nowy raycast i może trafić w inne miejsce niż cel rozpoczęcia.
+        mc.player.getInventory().selectedSlot = blockSlot;
         mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, target);
-
-        // Nie zbieraj plynu w tym samym ticku, w ktorym zostal postawiony.
-        // Interakcje ida do serwera asynchronicznie; natychmiastowe postawienie i
-        // zebranie w jednym ticku czesto powoduje, ze kolejne akcje nie trafiaja.
-        phase = 1;
-        waitTicks = 0;
-        cooldown = Math.max(1, (int) delay.get());
-        mc.player.sendMessage(Text.literal("§e[Error Killer] Próba postawienia płynu..."), true);
         return true;
-    }
-
-    @Override
-    public void onTick(MinecraftClient mc) {
-        if (phase == 0) return;
-        if (mc.player == null || mc.world == null || mc.interactionManager == null) {
-            reset();
-            return;
-        }
-        if (cooldown > 0) {
-            cooldown--;
-            return;
-        }
-
-        if (phase == 1) {
-            // Wait for the server to replace the button/lever cell with fluid.
-            if (fluidPos == null || mc.world.getFluidState(fluidPos).isEmpty()) {
-                if (++waitTicks > 40) {
-                    mc.player.sendMessage(Text.literal("§c[Error Killer] Płyn nie pojawił się w miejscu przycisku/dźwigni. Sprawdź, czy serwer pozwala tam stawiać płyn."), true);
-                    reset();
-                    return;
-                }
-                cooldown = 1;
-                return;
-            }
-            waitTicks = 0;
-            mc.player.sendMessage(Text.literal("§e[Error Killer] Płyn wykryty, próba zebrania..."), true);
-            pickUp(mc);
-            phase = 2;
-            cooldown = Math.max(1, (int) delay.get());
-        } else {
-            // Do not place the original block until the fluid source is gone.
-            if (fluidPos != null && !mc.world.getFluidState(fluidPos).isEmpty()) {
-                if (++waitTicks > 40) {
-                    mc.player.sendMessage(Text.literal("§c[Error Killer] Płyn nadal jest na miejscu — nie udało się go zebrać."), true);
-                    reset();
-                    return;
-                }
-                cooldown = 1;
-                return;
-            }
-            waitTicks = 0;
-            mc.player.sendMessage(Text.literal("§a[Error Killer] Płyn zebrany, stawiam wybrany blok."), true);
-            placeBlock(mc);
-        }
-    }
-
-    private void pickUp(MinecraftClient mc) {
-        switchTo(mc, fluidSlot);
-        if (fluidPos == null) return;
-        // Camera raycast may still hit the support block, so target the fluid cell directly.
-        BlockHitResult fluidHit = new BlockHitResult(
-                Vec3d.ofCenter(fluidPos), Direction.UP, fluidPos, false);
-        mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, fluidHit);
-    }
-
-    private void placeBlock(MinecraftClient mc) {
-        switchTo(mc, blockSlot);
-        if (target != null) mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, target);
-        reset();
-    }
-
-    private static void switchTo(MinecraftClient mc, int slot) {
-        if (slot >= 0 && slot < 9) mc.player.getInventory().selectedSlot = slot;
     }
 
     private static int findBucket(MinecraftClient mc) {
         for (int i = 0; i < 9; i++) {
-            ItemStack s = mc.player.getInventory().getStack(i);
-            if (s.isOf(Items.WATER_BUCKET) || s.isOf(Items.LAVA_BUCKET)) return i;
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isOf(Items.WATER_BUCKET) || stack.isOf(Items.LAVA_BUCKET)) return i;
         }
         return -1;
     }
@@ -198,7 +92,7 @@ public class ErrorKiller extends Module {
                         .mapClassName("intermediary", "net.minecraft.class_2401");
                 targetClass = Class.forName(name);
             } catch (Throwable t) {
-                OrangeClient.LOGGER.error("ErrorKiller: nie udalo sie rozwiazac klasy bloku-celu", t);
+                OrangeClient.LOGGER.error("ErrorKiller: nie udało się rozwiązać klasy bloku-celu", t);
             }
         }
         return targetClass != null && targetClass.isInstance(block);
