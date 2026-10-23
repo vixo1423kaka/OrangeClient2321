@@ -32,22 +32,30 @@ public class ErrorKiller extends Module {
     }
 
     /**
-     * Called from MinecraftClient#doItemUse HEAD. Returns true only when the
-     * attempted placement was handled by ErrorKiller.
+     * Called from MinecraftClient#doItemUse HEAD. Diagnostics are intentionally
+     * shown only for rejected attempts, so the first in-game test identifies
+     * the exact guard that prevents the bucket sequence.
      */
     public boolean tryIntercept(MinecraftClient mc) {
-        if (mc.player == null || mc.world == null || mc.interactionManager == null
-                || mc.crosshairTarget == null) {
-            return false;
+        if (mc.player == null || mc.world == null || mc.interactionManager == null) {
+            return reject(mc, "brak player/world/interactionManager");
         }
-        if (mc.crosshairTarget.getType() != HitResult.Type.BLOCK) return false;
+        if (mc.crosshairTarget == null) return reject(mc, "brak celu pod celownikiem");
+        if (mc.crosshairTarget.getType() != HitResult.Type.BLOCK) {
+            return reject(mc, "celownik nie wskazuje bloku");
+        }
 
         ItemStack selected = mc.player.getStackInHand(Hand.MAIN_HAND);
-        if (!(selected.getItem() instanceof BlockItem)) return false;
+        if (!(selected.getItem() instanceof BlockItem)) {
+            return reject(mc, "w rece nie ma bloku");
+        }
 
         BlockHitResult target = (BlockHitResult) mc.crosshairTarget;
         BlockPos placePos = target.getBlockPos().offset(target.getSide());
-        if (!isTargetBlock(mc.world.getBlockState(placePos).getBlock())) return false;
+        Block targetBlock = mc.world.getBlockState(placePos).getBlock();
+        if (!isTargetBlock(targetBlock)) {
+            return reject(mc, "pole docelowe nie jest obslugiwanym przyciskiem/dzwignia");
+        }
 
         int blockSlot = mc.player.getInventory().selectedSlot;
         int bucketSlot = findBucket(mc);
@@ -56,10 +64,8 @@ public class ErrorKiller extends Module {
             return false;
         }
 
-        // Important: preserve the original mod's exact interaction sequence.
-        // interactItem performs Minecraft's normal bucket raycast. Replacing it
-        // with interactBlock(target) targets the support block, not the bucket's
-        // actual fluid-placement target; waiting for fluid at placePos then stalls.
+        // Preserve the original interaction sequence: two normal bucket raycasts,
+        // then restore the selected block and retry its placement.
         mc.player.getInventory().selectedSlot = bucketSlot;
         mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
         mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
@@ -67,6 +73,13 @@ public class ErrorKiller extends Module {
         mc.player.getInventory().selectedSlot = blockSlot;
         mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, target);
         return true;
+    }
+
+    private boolean reject(MinecraftClient mc, String reason) {
+        if (mc.player != null) {
+            mc.player.sendMessage(Text.literal("§e[ErrorKiller debug] " + reason), true);
+        }
+        return false;
     }
 
     private static int findBucket(MinecraftClient mc) {
