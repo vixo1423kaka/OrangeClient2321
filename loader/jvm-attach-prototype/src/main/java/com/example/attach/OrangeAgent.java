@@ -27,6 +27,7 @@ public final class OrangeAgent {
     private static final String CLIENT_MAIN = "com.example.orangeclient.OrangeClient";
     private static final String LICENSE = "com.example.orangeclient.license.LicenseManager";
     private static final String LIVE_RES = "com.example.orangeclient.util.LiveResources";
+    private static final String LIVE_MIXINS = "com.example.orangeclient.live.LiveMixins";
     private static final String PAYLOAD_PREFIX = "payload/";
     private static final Object LOCK = new Object();
     private static volatile boolean done;
@@ -99,6 +100,7 @@ public final class OrangeAgent {
                     catch (Throwable t) { initDone.completeExceptionally(t.getCause() != null ? t.getCause() : t); }
                 });
                 initDone.get(30, java.util.concurrent.TimeUnit.SECONDS);
+                installMixins(mainLoader, inst);
                 done = true;
 
                 String key = parseKey(args);
@@ -115,6 +117,14 @@ public final class OrangeAgent {
             log("error (full trace):\n" + sw);
             log("error: " + c);
             result("FAILED " + c.getClass().getSimpleName() + ": " + c.getMessage());
+        }
+    }
+
+    private static void installMixins(ClassLoader cl, Instrumentation inst) {
+        try {
+            Class.forName(LIVE_MIXINS, true, cl).getMethod("install", Instrumentation.class).invoke(null, inst);
+        } catch (Throwable t) {
+            log("live mixins failed: " + (t.getCause() != null ? t.getCause() : t));
         }
     }
 
