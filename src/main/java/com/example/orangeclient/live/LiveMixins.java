@@ -168,7 +168,60 @@ public final class LiveMixins {
                     (mv, c) -> call(mv, "fluidHead", "(" + OBJ + ")V", 0),
                     (mv, op, c) -> {
                         if (op == Opcodes.IRETURN) call(mv, "fluidReturn", "()V");
-                    })
+                    }),
+
+            // LivingEntityRenderer.updateRenderState(LivingEntity,LivingEntityRenderState,float) RETURN: Chams friend marker
+            new MP("net/minecraft/class_922", "method_62354",
+                    "(Lnet/minecraft/class_1309;Lnet/minecraft/class_10042;F)V", null,
+                    (mv, op, c) -> {
+                        if (op != Opcodes.RETURN) return;
+                        mv.visitVarInsn(Opcodes.ALOAD, 0);
+                        mv.visitVarInsn(Opcodes.ALOAD, 1);
+                        mv.visitVarInsn(Opcodes.ALOAD, 2);
+                        mv.visitVarInsn(Opcodes.FLOAD, 3);
+                        mv.visitMethodInsn(Opcodes.INVOKESTATIC, HOOKS, "chamsMarkFriend",
+                                "(" + OBJ + OBJ + OBJ + "F)V", false);
+                    }),
+
+            // LivingEntityRenderer.render(LivingEntityRenderState,MatrixStack,VertexConsumerProvider,int) HEAD: Chams player pass
+            new MP("net/minecraft/class_922", "method_3936",
+                    "(Lnet/minecraft/class_10042;Lnet/minecraft/class_4587;Lnet/minecraft/class_4597;I)V",
+                    (mv, c) -> {
+                        mv.visitVarInsn(Opcodes.ALOAD, 0);
+                        mv.visitVarInsn(Opcodes.ALOAD, 1);
+                        mv.visitVarInsn(Opcodes.ALOAD, 2);
+                        mv.visitVarInsn(Opcodes.ILOAD, 4);
+                        mv.visitMethodInsn(Opcodes.INVOKESTATIC, HOOKS, "chamsPlayer",
+                                "(" + OBJ + OBJ + OBJ + "I)V", false);
+                    }, null),
+
+            // LivingEntityRenderer.getRenderLayer(state,boolean,boolean,boolean) RETURN: Chams hides the vanilla player body
+            new MP("net/minecraft/class_922", "method_24302",
+                    "(Lnet/minecraft/class_10042;ZZZ)Lnet/minecraft/class_1921;", null,
+                    (mv, op, c) -> {
+                        if (op != Opcodes.ARETURN) return;
+                        mv.visitVarInsn(Opcodes.ALOAD, 0);   // stack: ret, this
+                        mv.visitInsn(Opcodes.SWAP);          // stack: this, ret
+                        mv.visitVarInsn(Opcodes.ALOAD, 1);   // state
+                        mv.visitVarInsn(Opcodes.ILOAD, 2);
+                        mv.visitVarInsn(Opcodes.ILOAD, 3);
+                        mv.visitVarInsn(Opcodes.ILOAD, 4);
+                        mv.visitMethodInsn(Opcodes.INVOKESTATIC, HOOKS, "chamsLayer",
+                                "(" + OBJ + OBJ + OBJ + "ZZZ)" + OBJ, false);
+                        mv.visitTypeInsn(Opcodes.CHECKCAST, "net/minecraft/class_1921");
+                    }),
+
+            // HeldItemRenderer.renderItem(LivingEntity,ItemStack,ModelTransformationMode,boolean,MatrixStack,VertexConsumerProvider,int)
+            // HEAD: Chams held items (replaces the VertexConsumerProvider argument, local variable 6)
+            new MP("net/minecraft/class_759", "method_3233",
+                    "(Lnet/minecraft/class_1309;Lnet/minecraft/class_1799;Lnet/minecraft/class_811;ZLnet/minecraft/class_4587;Lnet/minecraft/class_4597;I)V",
+                    (mv, c) -> {
+                        mv.visitVarInsn(Opcodes.ALOAD, 6);
+                        mv.visitMethodInsn(Opcodes.INVOKESTATIC, HOOKS, "heldItemChams",
+                                "(" + OBJ + ")" + OBJ, false);
+                        mv.visitTypeInsn(Opcodes.CHECKCAST, "net/minecraft/class_4597");
+                        mv.visitVarInsn(Opcodes.ASTORE, 6);
+                    }, null)
     );
 
     private LiveMixins() {}
