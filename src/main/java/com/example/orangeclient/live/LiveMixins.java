@@ -8,7 +8,6 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.security.ProtectionDomain;
 import java.time.Instant;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -17,10 +16,12 @@ import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
-/** Runtime hooks for Minecraft 1.21.4 intermediary classes. */
+/** Runtime hooks for Minecraft 1.21.4 intermediary classes. All hooks live in MinecraftClient (class_310). */
 public final class LiveMixins {
     private static final String HOOKS = "com/example/orangeclient/live/Hooks";
-    private static final AtomicInteger PATCHED = new AtomicInteger();
+    private static final String CLIENT = "net/minecraft/class_310";
+    /** KillAura attack/restore hook at the end of MinecraftClient.tick(); dropped automatically if the JVM rejects it. */
+    private static volatile boolean withTail = true;
 
     private LiveMixins() {}
 
@@ -30,6 +31,10 @@ public final class LiveMixins {
             Files.writeString(p, Instant.now() + " " + message + System.lineSeparator(),
                     StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (Throwable ignored) { }
+    }
+
+    private static String describe(Throwable t) {
+        return t + (t.getCause() != null ? " (cause: " + t.getCause() + ")" : "");
     }
 
     public static void install(Instrumentation instrumentation) {
@@ -42,16 +47,13 @@ public final class LiveMixins {
             @Override
             public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
                                     ProtectionDomain protectionDomain, byte[] classfileBuffer) {
-                if (className == null) return null;
-                boolean client = className.equals("net/minecraft/class_310");
-                boolean player = className.equals("net/minecraft/class_746");
-                if (!client && !player) return null;
-
+                if (!CLIENT.equals(className)) return null;
                 try {
                     ClassReader reader = new ClassReader(classfileBuffer);
                     // Do not ask ASM to resolve Minecraft classes to recompute stack frames.
                     ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
                     int[] inserted = {0};
+                    boolean tail = withTail;
                     ClassVisitor visitor = new ClassVisitor(Opcodes.ASM9, writer) {
                         @Override
                         public MethodVisitor visitMethod(int access, String name, String descriptor,
@@ -59,7 +61,8 @@ public final class LiveMixins {
                             MethodVisitor base = super.visitMethod(access, name, descriptor, signature, exceptions);
                             if (base == null) return null;
 
-                            if (client && name.equals("method_1583") && descriptor.equals("()V")) {
+                            // MinecraftClient.doItemUse(): ErrorKiller, cancellable
+                            if (name.equals("method_1583") && descriptor.equals("()V")) {
                                 inserted[0]++;
                                 return new MethodVisitor(Opcodes.ASM9, base) {
                                     @Override public void visitCode() {
@@ -77,7 +80,8 @@ public final class LiveMixins {
                                 };
                             }
 
-                            if (client && name.equals("method_1574") && descriptor.equals("()V")) {
+                            // MinecraftClient.tick(): KillAura rotation at the start, attack + restore at the end
+                            if (name.equals("method_1574") && descriptor.equals("()V")) {
                                 inserted[0]++;
                                 return new MethodVisitor(Opcodes.ASM9, base) {
                                     @Override public void visitCode() {
@@ -86,20 +90,8 @@ public final class LiveMixins {
                                         super.visitMethodInsn(Opcodes.INVOKESTATIC, HOOKS, "killAuraTick",
                                                 "(Ljava/lang/Object;)V", false);
                                     }
-                                };
-                            }
-
-                            if (player && name.equals("method_3136") && descriptor.equals("()V")) {
-                                inserted[0]++;
-                                return new MethodVisitor(Opcodes.ASM9, base) {
-                                    @Override public void visitCode() {
-                                        super.visitCode();
-                                        super.visitVarInsn(Opcodes.ALOAD, 0);
-                                        super.visitMethodInsn(Opcodes.INVOKESTATIC, HOOKS, "killAuraPre",
-                                                "(Ljava/lang/Object;)V", false);
-                                    }
                                     @Override public void visitInsn(int opcode) {
-                                        if (opcode == Opcodes.RETURN) {
+                                        if (tail && opcode == Opcodes.RETURN) {
                                             super.visitVarInsn(Opcodes.ALOAD, 0);
                                             super.visitMethodInsn(Opcodes.INVOKESTATIC, HOOKS, "killAuraPost",
                                                     "(Ljava/lang/Object;)V", false);
@@ -116,11 +108,11 @@ public final class LiveMixins {
                         log("skip " + className + ": expected methods not found");
                         return null;
                     }
-                    PATCHED.incrementAndGet();
-                    log("prepared hooks for " + className + " (" + inserted[0] + " methods)");
+                    log("prepared hooks for " + className + " (" + inserted[0] + " methods, killAuraPost tail hook="
+                            + tail + ")");
                     return writer.toByteArray();
                 } catch (Throwable error) {
-                    log("failed to patch " + className + ": " + error);
+                    log("failed to patch " + className + ": " + describe(error));
                     return null;
                 }
             }
@@ -129,26 +121,37 @@ public final class LiveMixins {
         try {
             instrumentation.addTransformer(transformer, true);
             int targets = 0;
+            int patched = 0;
             for (Class<?> loaded : instrumentation.getAllLoadedClasses()) {
-                String name = loaded.getName();
-                if (name.equals("net.minecraft.class_310") || name.equals("net.minecraft.class_746")) {
-                    targets++;
-                    if (!instrumentation.isModifiableClass(loaded)) {
-                        log("skip " + name + ": class is not modifiable");
-                        continue;
-                    }
-                    try {
-                        instrumentation.retransformClasses(loaded);
-                        log("live mixins: retransformed " + name);
-                    } catch (Throwable error) {
-                        log("failed to retransform " + name + ": " + error);
+                if (!loaded.getName().equals("net.minecraft.class_310")) continue;
+                targets++;
+                if (!instrumentation.isModifiableClass(loaded)) {
+                    log("skip " + loaded.getName() + ": class is not modifiable");
+                    continue;
+                }
+                try {
+                    instrumentation.retransformClasses(loaded);
+                    patched++;
+                    log("live mixins: retransformed " + loaded.getName() + " (killAuraPost tail hook=" + withTail + ")");
+                } catch (Throwable error) {
+                    log("failed to retransform " + loaded.getName() + ": " + describe(error));
+                    if (withTail) {
+                        // The JVM rejected the class with the tail hook. Retry without it so ErrorKiller still works.
+                        withTail = false;
+                        try {
+                            instrumentation.retransformClasses(loaded);
+                            patched++;
+                            log("live mixins: retransformed " + loaded.getName() + " WITHOUT killAuraPost tail hook");
+                        } catch (Throwable retry) {
+                            log("retry without tail hook failed: " + describe(retry));
+                        }
                     }
                 }
             }
             if (targets == 0) log("target not found: Minecraft intermediary classes were not loaded");
-            log("live mixins: " + PATCHED.get() + "/" + targets + " target classes patched");
+            log("live mixins: " + patched + "/" + targets + " target classes patched");
         } catch (Throwable error) {
-            log("install failed: " + error);
+            log("install failed: " + describe(error));
         }
     }
 }
