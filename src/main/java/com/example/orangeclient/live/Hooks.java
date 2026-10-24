@@ -5,13 +5,16 @@ import com.example.orangeclient.module.combat.Hitbox;
 import com.example.orangeclient.module.combat.KillAura;
 import com.example.orangeclient.module.player.AntiTrap;
 import com.example.orangeclient.module.player.ErrorKiller;
+import com.example.orangeclient.module.player.NoPush;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.Vec3d;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -112,5 +115,63 @@ public final class Hooks {
             }
             return null;
         } catch (Throwable t) { fail("antiTrapNoGui", t); return null; }
+    }
+
+    private record Saved(Entity entity, Vec3d velocity) {}
+    private static final ThreadLocal<Saved> PUSH_SAVED = new ThreadLocal<>();
+    private static final ThreadLocal<Saved> FLUID_SAVED = new ThreadLocal<>();
+
+    /** ClientPlayerEntity.pushOutOfBlocks() HEAD, cancellable: NoPush > Blocks. */
+    public static boolean noBlockPush(Object self) {
+        try {
+            NoPush np = ModuleManager.get(NoPush.class);
+            boolean cancel = np != null && np.blocksBlockPush();
+            if (cancel) fired("noBlockPush (cancelled a push out of a block)");
+            return cancel;
+        } catch (Throwable t) { fail("noBlockPush", t); return false; }
+    }
+
+    /** Entity.pushAwayFrom() HEAD: remember the local player's velocity (NoPush > Entities). */
+    public static void pushHead(Object self, Object other) {
+        PUSH_SAVED.remove();
+        try {
+            ClientPlayerEntity p = MinecraftClient.getInstance().player;
+            NoPush np = ModuleManager.get(NoPush.class);
+            if (p == null || np == null || !np.blocksEntityPush()) return;
+            if (self == p || other == p) PUSH_SAVED.set(new Saved(p, p.getVelocity()));
+        } catch (Throwable t) { fail("pushHead", t); }
+    }
+
+    /** Entity.pushAwayFrom() RETURN: restore it. */
+    public static void pushReturn() {
+        Saved s = PUSH_SAVED.get();
+        if (s == null) return;
+        PUSH_SAVED.remove();
+        try {
+            s.entity().setVelocity(s.velocity());
+            fired("pushReturn (restored velocity)");
+        } catch (Throwable t) { fail("pushReturn", t); }
+    }
+
+    /** Entity.updateMovementInFluid() HEAD: remember the local player's velocity (NoPush > Liquids). */
+    public static void fluidHead(Object self) {
+        FLUID_SAVED.remove();
+        try {
+            NoPush np = ModuleManager.get(NoPush.class);
+            if (np != null && np.blocksLiquidPush() && self instanceof ClientPlayerEntity p) {
+                FLUID_SAVED.set(new Saved(p, p.getVelocity()));
+            }
+        } catch (Throwable t) { fail("fluidHead", t); }
+    }
+
+    /** Entity.updateMovementInFluid() RETURN: undo the current's push. */
+    public static void fluidReturn() {
+        Saved s = FLUID_SAVED.get();
+        if (s == null) return;
+        FLUID_SAVED.remove();
+        try {
+            s.entity().setVelocity(s.velocity());
+            fired("fluidReturn (restored velocity)");
+        } catch (Throwable t) { fail("fluidReturn", t); }
     }
 }
