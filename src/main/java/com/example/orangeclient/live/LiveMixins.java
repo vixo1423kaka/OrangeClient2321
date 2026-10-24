@@ -221,6 +221,41 @@ public final class LiveMixins {
                                 "(" + OBJ + ")" + OBJ, false);
                         mv.visitTypeInsn(Opcodes.CHECKCAST, "net/minecraft/class_4597");
                         mv.visitVarInsn(Opcodes.ASTORE, 6);
+                    }, null),
+
+            // HeldItemRenderer.renderFirstPersonItem(AbstractClientPlayerEntity,float,float,Hand,float,ItemStack,float,MatrixStack,VertexConsumerProvider,int)
+            // HEAD, cancellable: HandAnimations. Name is "*" because only the descriptor is needed to identify this method.
+            new MP("net/minecraft/class_759", "*",
+                    "(Lnet/minecraft/class_742;FFLnet/minecraft/class_1268;FLnet/minecraft/class_1799;FLnet/minecraft/class_4587;Lnet/minecraft/class_4597;I)V",
+                    (mv, c) -> {
+                        mv.visitVarInsn(Opcodes.ALOAD, 0);   // this (HeldItemRenderer)
+                        mv.visitVarInsn(Opcodes.ALOAD, 1);   // player
+                        mv.visitVarInsn(Opcodes.ALOAD, 4);   // hand
+                        mv.visitVarInsn(Opcodes.FLOAD, 5);   // swingProgress
+                        mv.visitVarInsn(Opcodes.ALOAD, 6);   // item
+                        mv.visitVarInsn(Opcodes.FLOAD, 7);   // equipProgress
+                        mv.visitVarInsn(Opcodes.ALOAD, 8);   // matrices
+                        mv.visitVarInsn(Opcodes.ALOAD, 9);   // vertexConsumers
+                        mv.visitVarInsn(Opcodes.ILOAD, 10);  // light
+                        mv.visitMethodInsn(Opcodes.INVOKESTATIC, HOOKS, "handAnimations",
+                                "(" + OBJ + OBJ + OBJ + "F" + OBJ + "F" + OBJ + OBJ + "I)Z", false);
+                        Label go = new Label();
+                        mv.visitJumpInsn(Opcodes.IFEQ, go);
+                        mv.visitInsn(Opcodes.RETURN);
+                        frame(mv, c, go);
+                    }, null),
+
+            // LivingEntity.getHandSwingDuration() HEAD: HandAnimations > SlowAnimation (hook returns -1 to keep vanilla)
+            new MP("net/minecraft/class_1309", "method_6028", "()I",
+                    (mv, c) -> {
+                        mv.visitVarInsn(Opcodes.ALOAD, 0);
+                        mv.visitMethodInsn(Opcodes.INVOKESTATIC, HOOKS, "swingDuration", "(" + OBJ + ")I", false);
+                        mv.visitInsn(Opcodes.DUP);
+                        Label keep = new Label();
+                        mv.visitJumpInsn(Opcodes.IFLE, keep);
+                        mv.visitInsn(Opcodes.IRETURN);
+                        frame(mv, c, keep, Opcodes.INTEGER);
+                        mv.visitInsn(Opcodes.POP);
                     }, null)
     );
 
