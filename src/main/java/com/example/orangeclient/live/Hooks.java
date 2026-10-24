@@ -11,6 +11,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class Hooks {
     private static final Set<String> FIRED = ConcurrentHashMap.newKeySet();
     private static boolean failedLogged;
+    /** True when killAuraTick ran this tick, so killAuraPost (end of tick) must attack and restore the camera. */
+    private static boolean killAuraActive;
 
     private Hooks() {}
 
@@ -36,36 +38,31 @@ public final class Hooks {
         } catch (Throwable t) { fail("errorKiller", t); return false; }
     }
 
-    /** ClientPlayerEntity.tick() HEAD. */
+    /** MinecraftClient.tick() HEAD: set the server rotation before the player ticks and sends movement packets. */
     public static void killAuraTick(Object self) {
+        killAuraActive = false;
         try {
             fired("killAuraTick");
             KillAura ka = ModuleManager.get(KillAura.class);
             if (ka != null && ka.isEnabled()) {
                 fired("killAuraTick (module enabled)");
+                killAuraActive = true;
                 ka.tickRotation(MinecraftClient.getInstance());
             }
         } catch (Throwable t) { fail("killAuraTick", t); }
     }
 
-    /** ClientPlayerEntity.sendMovementPackets() HEAD. */
-    public static void killAuraPre(Object self) {
-        try {
-            fired("killAuraPre");
-            KillAura ka = ModuleManager.get(KillAura.class);
-            if (ka != null && ka.isEnabled()) {
-                fired("killAuraPre (module enabled)");
-                ka.preMotion(MinecraftClient.getInstance());
-            }
-        } catch (Throwable t) { fail("killAuraPre", t); }
-    }
+    /** Not used any more (ClientPlayerEntity.sendMovementPackets() could not be patched). Kept for compatibility. */
+    public static void killAuraPre(Object self) { }
 
-    /** ClientPlayerEntity.sendMovementPackets() RETURN. */
+    /** MinecraftClient.tick() RETURN: the movement packet with the rotation was already sent, so attack and restore the camera. */
     public static void killAuraPost(Object self) {
+        if (!killAuraActive) return;
+        killAuraActive = false;
         try {
             fired("killAuraPost");
             KillAura ka = ModuleManager.get(KillAura.class);
-            if (ka != null && ka.isEnabled()) {
+            if (ka != null) {
                 fired("killAuraPost (module enabled)");
                 ka.postMotion(MinecraftClient.getInstance());
             }
