@@ -171,7 +171,7 @@ public final class LiveMixins {
                     }),
 
             // LivingEntityRenderer.updateRenderState(LivingEntity,LivingEntityRenderState,float) RETURN: Chams friend marker
-            new MP("net/minecraft/class_922", "method_62354",
+            new MP("net/minecraft/class_922", "*",
                     "(Lnet/minecraft/class_1309;Lnet/minecraft/class_10042;F)V", null,
                     (mv, op, c) -> {
                         if (op != Opcodes.RETURN) return;
@@ -184,7 +184,7 @@ public final class LiveMixins {
                     }),
 
             // LivingEntityRenderer.render(LivingEntityRenderState,MatrixStack,VertexConsumerProvider,int) HEAD: Chams player pass
-            new MP("net/minecraft/class_922", "method_3936",
+            new MP("net/minecraft/class_922", "*",
                     "(Lnet/minecraft/class_10042;Lnet/minecraft/class_4587;Lnet/minecraft/class_4597;I)V",
                     (mv, c) -> {
                         mv.visitVarInsn(Opcodes.ALOAD, 0);
@@ -258,14 +258,19 @@ public final class LiveMixins {
                     // Do not ask ASM to resolve Minecraft classes to recompute stack frames.
                     ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
                     Set<MP> applied = new HashSet<>();
+                    List<String> seenMethods = new ArrayList<>();
                     ClassVisitor visitor = new ClassVisitor(Opcodes.ASM9, writer) {
                         @Override
                         public MethodVisitor visitMethod(int access, String name, String descriptor,
                                                          String signature, String[] exceptions) {
                             MethodVisitor base = super.visitMethod(access, name, descriptor, signature, exceptions);
                             if (base == null) return null;
+                            if (descriptor.contains("class_10042") || descriptor.contains("class_4587")) {
+                                seenMethods.add(name + descriptor);
+                            }
                             for (MP p : mine) {
-                                if (!p.name().equals(name) || !p.desc().equals(descriptor)) continue;
+                                boolean nameOk = p.name().equals("*") || p.name().equals(name);
+                                if (!nameOk || !p.desc().equals(descriptor)) continue;
                                 applied.add(p);
                                 Ctx ctx = new Ctx(className, (access & Opcodes.ACC_STATIC) != 0, descriptor);
                                 return new MethodVisitor(Opcodes.ASM9, base) {
@@ -287,6 +292,9 @@ public final class LiveMixins {
                     reader.accept(visitor, ClassReader.EXPAND_FRAMES);
                     for (MP p : mine) {
                         if (!applied.contains(p)) log("target not found: " + p.owner() + "." + p.name() + p.desc());
+                    }
+                    if (applied.size() < mine.size()) {
+                        log("methods of " + className + " that use LivingEntityRenderState or MatrixStack: " + seenMethods);
                     }
                     if (applied.isEmpty()) return null;
                     log("prepared hooks for " + className + " (" + applied.size() + " methods, killAuraPost tail hook="
