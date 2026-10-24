@@ -1,6 +1,14 @@
 package com.example.orangeclient.live;
 
 import com.example.orangeclient.friend.Friends;
+import net.minecraft.util.Hand;
+import net.minecraft.util.Arm;
+import net.minecraft.item.ModelTransformationMode;
+import net.minecraft.item.Items;
+import net.minecraft.item.ItemStack;
+import net.minecraft.client.render.item.HeldItemRenderer;
+import net.minecraft.client.network.AbstractClientPlayerEntity;
+import com.example.orangeclient.module.render.HandAnimations;
 import com.example.orangeclient.module.render.Chams;
 import com.example.orangeclient.render.HeldItemChamsVertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
@@ -260,4 +268,46 @@ public final class Hooks {
             return HeldItemChamsVertexConsumer.wrap((VertexConsumerProvider) original, chams);
         } catch (Throwable t) { fail("heldItemChams", t); return original; }
     }
+
+    /** HeldItemRenderer.renderFirstPersonItem() HEAD, cancellable: HandAnimations (same logic as the former HeldItemRendererMixin). */
+    public static boolean handAnimations(Object self, Object playerObj, Object handObj, float swingProgress,
+                                         Object itemObj, float equipProgress, Object matricesObj,
+                                         Object vertexConsumersObj, int light) {
+        try {
+            HandAnimations ha = ModuleManager.get(HandAnimations.class);
+            if (ha == null || !ha.shouldAnimate()) return false;
+            AbstractClientPlayerEntity player = (AbstractClientPlayerEntity) playerObj;
+            Hand hand = (Hand) handObj;
+            ItemStack item = (ItemStack) itemObj;
+            if (item.isEmpty() || item.isOf(Items.FILLED_MAP) || item.isOf(Items.CROSSBOW) || player.isUsingSpyglass()) return false;
+            if (player.isUsingItem() && player.getItemUseTimeLeft() > 0 && player.getActiveHand() == hand) return false;
+            if (player.isUsingRiptide()) return false;
+
+            Arm arm = hand == Hand.MAIN_HAND ? player.getMainArm() : player.getMainArm().getOpposite();
+            boolean right = arm == Arm.RIGHT;
+            MatrixStack matrices = (MatrixStack) matricesObj;
+            matrices.push();
+            try {
+                ha.apply(matrices, arm, swingProgress, equipProgress);
+                ((HeldItemRenderer) self).renderItem(player, item,
+                        right ? ModelTransformationMode.FIRST_PERSON_RIGHT_HAND : ModelTransformationMode.FIRST_PERSON_LEFT_HAND,
+                        !right, matrices, (VertexConsumerProvider) vertexConsumersObj, light);
+            } finally {
+                matrices.pop();
+            }
+            fired("handAnimations (replaced a swing)");
+            return true;
+        } catch (Throwable t) { fail("handAnimations", t); return false; }
+    }
+
+    /** LivingEntity.getHandSwingDuration() HEAD: HandAnimations > SlowAnimation. Returns -1 to keep the vanilla value. */
+    public static int swingDuration(Object self) {
+        try {
+            if (self != MinecraftClient.getInstance().player) return -1;
+            int d = HandAnimations.swingDuration();
+            if (d > 0) fired("swingDuration (slowed the local swing)");
+            return d;
+        } catch (Throwable t) { fail("swingDuration", t); return -1; }
+    }
+
 }
