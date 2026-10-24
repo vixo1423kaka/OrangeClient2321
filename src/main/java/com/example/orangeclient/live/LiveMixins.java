@@ -151,7 +151,24 @@ public final class LiveMixins {
             // ClientPlayerInteractionManager.interactBlock(player,hand,hit): AntiTrap NoBlockGui
             new MP("net/minecraft/class_636", "method_2896",
                     "(Lnet/minecraft/class_746;Lnet/minecraft/class_1268;Lnet/minecraft/class_3965;)Lnet/minecraft/class_1269;",
-                    cancelObject("antiTrapNoGui", "net/minecraft/class_1269", 0, 1, 2, 3), null)
+                    cancelObject("antiTrapNoGui", "net/minecraft/class_1269", 0, 1, 2, 3), null),
+
+            // ClientPlayerEntity.pushOutOfBlocks(double,double): NoPush > Blocks (cancellable)
+            new MP("net/minecraft/class_746", "method_30673", "(DD)V", cancelVoid("noBlockPush", 0), null),
+
+            // Entity.pushAwayFrom(Entity): NoPush > Entities (remember the local player's velocity, restore it afterwards)
+            new MP("net/minecraft/class_1297", "method_5697", "(Lnet/minecraft/class_1297;)V",
+                    (mv, c) -> call(mv, "pushHead", "(" + OBJ + OBJ + ")V", 0, 1),
+                    (mv, op, c) -> {
+                        if (op == Opcodes.RETURN) call(mv, "pushReturn", "()V");
+                    }),
+
+            // Entity.updateMovementInFluid(TagKey,double): NoPush > Liquids
+            new MP("net/minecraft/class_1297", "method_5692", "(Lnet/minecraft/class_6862;D)Z",
+                    (mv, c) -> call(mv, "fluidHead", "(" + OBJ + ")V", 0),
+                    (mv, op, c) -> {
+                        if (op == Opcodes.IRETURN) call(mv, "fluidReturn", "()V");
+                    })
     );
 
     private LiveMixins() {}
