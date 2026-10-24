@@ -1,5 +1,15 @@
 package com.example.orangeclient.live;
 
+import com.example.orangeclient.friend.Friends;
+import com.example.orangeclient.module.render.Chams;
+import com.example.orangeclient.render.HeldItemChamsVertexConsumer;
+import net.minecraft.client.render.VertexConsumerProvider;
+import net.minecraft.client.render.entity.LivingEntityRenderer;
+import net.minecraft.client.render.entity.model.EntityModel;
+import net.minecraft.client.render.entity.state.LivingEntityRenderState;
+import net.minecraft.client.render.entity.state.PlayerEntityRenderState;
+import net.minecraft.client.util.math.MatrixStack;
+import java.lang.reflect.Method;
 import com.example.orangeclient.module.ModuleManager;
 import com.example.orangeclient.module.combat.Hitbox;
 import com.example.orangeclient.module.combat.KillAura;
@@ -32,11 +42,10 @@ public final class Hooks {
     }
 
     private static void fail(String where, Throwable t) {
-        if (failedLogged) return;
-        failedLogged = true;
+        if (!FIRED.add("error in " + where)) return;
         java.io.StringWriter sw = new java.io.StringWriter();
         t.printStackTrace(new java.io.PrintWriter(sw));
-        LiveMixins.log("hook error in " + where + " (further errors suppressed):\n" + sw);
+        LiveMixins.log("hook error in " + where + " (further errors in this hook suppressed):\n" + sw);
     }
 
     /** MinecraftClient.doItemUse() HEAD, cancellable. */
@@ -173,5 +182,82 @@ public final class Hooks {
             s.entity().setVelocity(s.velocity());
             fired("fluidReturn (restored velocity)");
         } catch (Throwable t) { fail("fluidReturn", t); }
+    }
+
+    private static Method setupTransformsMethod;
+    private static Method scaleMethod;
+
+    private static Method findMethod(Class<?> owner, String intermediary, String named, Class<?>... types)
+            throws NoSuchMethodException {
+        for (String n : new String[] { intermediary, named }) {
+            try {
+                Method m = owner.getDeclaredMethod(n, types);
+                m.setAccessible(true);
+                return m;
+            } catch (NoSuchMethodException ignored) { }
+        }
+        throw new NoSuchMethodException(owner.getName() + "." + named + " / " + intermediary);
+    }
+
+    /** LivingEntityRenderer.updateRenderState() RETURN: Chams remembers which players are friends. */
+    public static void chamsMarkFriend(Object self, Object entity, Object state, float tickDelta) {
+        try {
+            if (entity instanceof PlayerEntity player && state instanceof LivingEntityRenderState s) {
+                Chams.markFriend(s, Friends.isFriend(player));
+            }
+        } catch (Throwable t) { fail("chamsMarkFriend", t); }
+    }
+
+    /** LivingEntityRenderer.render() HEAD: extra player model pass without depth test (Chams). */
+    public static void chamsPlayer(Object self, Object stateObj, Object matricesObj, int light) {
+        try {
+            Chams chams = ModuleManager.get(Chams.class);
+            if (chams == null || !chams.isEnabled()) return;
+            LivingEntityRenderState state = (LivingEntityRenderState) stateObj;
+            if (!chams.rendersPlayers(state)) return;
+            MatrixStack matrices = (MatrixStack) matricesObj;
+            LivingEntityRenderer<?, ?, ?> renderer = (LivingEntityRenderer<?, ?, ?>) self;
+            if (setupTransformsMethod == null) {
+                setupTransformsMethod = findMethod(LivingEntityRenderer.class, "method_4058", "setupTransforms",
+                        LivingEntityRenderState.class, MatrixStack.class, float.class, float.class);
+                scaleMethod = findMethod(LivingEntityRenderer.class, "method_4042", "scale",
+                        LivingEntityRenderState.class, MatrixStack.class);
+            }
+            EntityModel<?> model = renderer.getModel();
+            matrices.push();
+            float scale = state.baseScale;
+            matrices.scale(scale, scale, scale);
+            try {
+                setupTransformsMethod.invoke(renderer, state, matrices, state.bodyYaw, scale);
+                matrices.scale(-1.0f, -1.0f, 1.0f);
+                scaleMethod.invoke(renderer, state, matrices);
+                matrices.translate(0.0f, -1.501f, 0.0f);
+                chams.drawPlayer((PlayerEntityRenderState) state, model, matrices, light);
+            } finally {
+                matrices.pop();
+            }
+            fired("chamsPlayer (drew a player pass)");
+        } catch (Throwable t) { fail("chamsPlayer", t); }
+    }
+
+    /** LivingEntityRenderer.getRenderLayer() RETURN: Chams hides the vanilla player body (returns null). */
+    public static Object chamsLayer(Object self, Object ret, Object state, boolean showBody, boolean translucent, boolean showOutline) {
+        try {
+            Chams chams = ModuleManager.get(Chams.class);
+            if (chams != null && chams.isEnabled() && state instanceof LivingEntityRenderState s && chams.hidesPlayerBody(s)) {
+                return null;
+            }
+            return ret;
+        } catch (Throwable t) { fail("chamsLayer", t); return ret; }
+    }
+
+    /** HeldItemRenderer.renderItem() HEAD: wraps the vertex consumer provider for Chams on held items. */
+    public static Object heldItemChams(Object original) {
+        try {
+            Chams chams = ModuleManager.get(Chams.class);
+            if (chams == null || !chams.isEnabled() || !chams.rendersHeldItems()) return original;
+            fired("heldItemChams (wrapped held item renderer)");
+            return HeldItemChamsVertexConsumer.wrap((VertexConsumerProvider) original, chams);
+        } catch (Throwable t) { fail("heldItemChams", t); return original; }
     }
 }
